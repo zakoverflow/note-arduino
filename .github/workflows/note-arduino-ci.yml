@@ -122,6 +122,14 @@ jobs:
                           "$IMAGE" \
                           --coverage --mem-check
 
+      # python3 is on the ubuntu-latest runner and in the CI image. The gate
+      # reads the lcov tracefile that "Run tests" wrote, so it needs no Docker.
+      - name: Test the coverage gate
+        run: python3 -m unittest discover -s test/tools -p 'test_*.py'
+
+      - name: Coverage gate (missed lines and branches must not rise)
+        run: python3 scripts/coverage_gate.py coverage/lcov.info test/coverage-baseline.json
+
       - name: Adjust lcov source file paths for Coveralls
         run: sudo sed -i 's/\/note-arduino\///g' ./coverage/lcov.info
 
