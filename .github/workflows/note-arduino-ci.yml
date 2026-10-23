@@ -131,6 +131,21 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path-to-lcov: ./coverage/lcov.info
 
+  # The spec in docs/spec is generated from the test names. It fails only when
+  # the spec is not up to date. It never fails on the advisory
+  # "interaction" flag. python3 is on the ubuntu-latest runner (and in the CI
+  # image), so this job needs no Docker image.
+  spec_up_to_date:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Check that docs/spec is up to date
+        run: python3 scripts/extract_spec.py --check
+
   build_examples:
     runs-on: ubuntu-latest
     timeout-minutes: 15
