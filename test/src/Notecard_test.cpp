@@ -984,16 +984,54 @@ TEST_CASE("test_notecard_end_clears_all_serial_interface_function_pointers_when_
   CHECK(!NoteSetFnSerial_fake.arg3_val);
 }
 
+// Models the platform hooks that note-c keeps (see n_hooks.c):
+// NoteSetFnDefault() fills only the hooks that are empty.
+// NoteSetFn() replaces all hooks, also with nullptr.
+struct NotePlatformHooks {
+  mallocFn malloc_hook = nullptr;
+  freeFn free_hook = nullptr;
+  delayMsFn delay_ms_hook = nullptr;
+  getMsFn get_ms_hook = nullptr;
+
+  bool anySet(void) const
+  {
+    return malloc_hook || free_hook || delay_ms_hook || get_ms_hook;
+  }
+
+  bool allSet(void) const
+  {
+    return malloc_hook && free_hook && delay_ms_hook && get_ms_hook;
+  }
+};
+
+static NotePlatformHooks note_platform_hooks;
+
+static void notePlatformHooksSetDefault(mallocFn malloc_fn, freeFn free_fn, delayMsFn delay_fn, getMsFn ms_fn)
+{
+  if (!note_platform_hooks.malloc_hook) { note_platform_hooks.malloc_hook = malloc_fn; }
+  if (!note_platform_hooks.free_hook) { note_platform_hooks.free_hook = free_fn; }
+  if (!note_platform_hooks.delay_ms_hook) { note_platform_hooks.delay_ms_hook = delay_fn; }
+  if (!note_platform_hooks.get_ms_hook) { note_platform_hooks.get_ms_hook = ms_fn; }
+}
+
+static void notePlatformHooksSet(mallocFn malloc_fn, freeFn free_fn, delayMsFn delay_fn, getMsFn ms_fn)
+{
+  note_platform_hooks = NotePlatformHooks{malloc_fn, free_fn, delay_fn, ms_fn};
+}
+
 TEST_CASE("test_notecard_end_clears_all_platform_interface_function_pointers", "[Notecard]")
 {
   resetFakes();
    // Arrange
   ////////////
 
+  note_platform_hooks = NotePlatformHooks{};
+  NoteSetFnDefault_fake.custom_fake = notePlatformHooksSetDefault;
+  NoteSetFn_fake.custom_fake = notePlatformHooksSet;
   Notecard notecard;
   NoteI2c_Fake fakeI2c;
-  RESET_FAKE(NoteSetFn);
   notecard.begin(&fakeI2c);
+  REQUIRE(note_platform_hooks.allSet());
 
    // Action
   ///////////
@@ -1003,10 +1041,7 @@ TEST_CASE("test_notecard_end_clears_all_platform_interface_function_pointers", "
    // Assert
   ///////////
 
-  CHECK(!NoteSetFn_fake.arg0_val);
-  CHECK(!NoteSetFn_fake.arg1_val);
-  CHECK(!NoteSetFn_fake.arg2_val);
-  CHECK(!NoteSetFn_fake.arg3_val);
+  CHECK(!note_platform_hooks.anySet());
 }
 
 TEST_CASE("test_notecard_end_provides_nullptr_to_make_note_i2c_to_free_associated_memory_when_the_i2c_interface_has_been_instantiated", "[Notecard]")
