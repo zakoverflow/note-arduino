@@ -2,7 +2,7 @@
 
 # Spec: NoteTxn_Arduino
 
-Source: `src/NoteTxn_Arduino.cpp`. Tests: 16. Interaction checks (flagged): 7.
+Source: `src/NoteTxn_Arduino.cpp`. Tests: 21. Interaction checks (flagged): 7.
 
 
 ## make note txn
@@ -13,6 +13,19 @@ Source: `src/NoteTxn_Arduino.cpp`. Tests: 16. Interaction checks (flagged): 7.
   <sub>`NoteTxn_Arduino_test.cpp` `test_make_note_txn_enforces_singleton_by_returning_same_notetxn_object_for_all_calls`</sub>
 - `behavior` — make note txn deletes singleton when same pins are passed as parameter  
   <sub>`NoteTxn_Arduino_test.cpp` `test_make_note_txn_deletes_singleton_when_same_pins_are_passed_as_parameter`</sub>
+- `behavior` — make note txn deletes singleton when nullptr is passed as parameter  
+  <sub>`NoteTxn_Arduino_test.cpp` `test_make_note_txn_deletes_singleton_when_nullptr_is_passed_as_parameter`</sub>
+- `behavior` — make note txn instantiates notetxn object when pins are const  
+  <sub>`NoteTxn_Arduino_test.cpp` `test_make_note_txn_instantiates_notetxn_object_when_pins_are_const`</sub>
+- `behavior` — make note txn deletes singleton when same pins are const and passed as parameter  
+  <sub>`NoteTxn_Arduino_test.cpp` `test_make_note_txn_deletes_singleton_when_same_pins_are_const_and_passed_as_parameter`</sub>
+
+## general
+
+- `behavior` — make note txn returns nullptr when nullptr is passed as parameter and no instance exists  
+  <sub>`NoteTxn_Arduino_test.cpp` `test_make_note_txn_returns_nullptr_when_nullptr_is_passed_as_parameter_and_no_instance_exists`</sub>
+- `behavior` — make note txn returns nullptr when same pins are passed as parameter and no instance exists  
+  <sub>`NoteTxn_Arduino_test.cpp` `test_make_note_txn_returns_nullptr_when_same_pins_are_passed_as_parameter_and_no_instance_exists`</sub>
 
 ## constructor
 

@@ -65,6 +65,19 @@ TEST_CASE("test_make_note_log_deletes_singleton_when_nullptr_is_passed_as_parame
     CHECK(nullptr == notelog);
 }
 
+TEST_CASE("test_make_note_log_returns_nullptr_when_nullptr_is_passed_as_parameter_and_no_instance_exists", "[NoteLog_Arduino]")
+{
+  resetFakes();
+  // Arrange
+  // No test leaves an instance behind, so none exists here.
+
+  // Action
+  NoteLog * const notelog = make_note_log(nullptr);
+
+  // Assert
+  CHECK(nullptr == notelog);
+}
+
 TEST_CASE("test_notelog_arduino_print_does_not_modify_str_parameter_value_before_passing_to_stream_print", "[NoteLog_Arduino]")
 {
   resetFakes();

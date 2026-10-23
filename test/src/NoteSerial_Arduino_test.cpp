@@ -65,6 +65,19 @@ TEST_CASE("test_make_note_serial_deletes_singleton_when_nullptr_is_passed_as_par
     CHECK(nullptr == noteserial);
 }
 
+TEST_CASE("test_make_note_serial_returns_nullptr_when_nullptr_is_passed_as_parameter_and_no_instance_exists", "[NoteSerial_Arduino]")
+{
+  resetFakes();
+  // Arrange
+  // No test leaves an instance behind, so none exists here.
+
+  // Action
+  NoteSerial * const noteserial = make_note_serial(nullptr);
+
+  // Assert
+  CHECK(nullptr == noteserial);
+}
+
 TEST_CASE("test_noteserial_arduino_constructor_invokes_hardware_serial_parameter_begin_method", "[NoteSerial_Arduino]")
 {
   resetFakes();

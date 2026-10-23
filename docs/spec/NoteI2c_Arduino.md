@@ -2,7 +2,7 @@
 
 # Spec: NoteI2c_Arduino
 
-Source: `src/NoteI2c_Arduino.cpp`. Tests: 40. Interaction checks (flagged): 6.
+Source: `src/NoteI2c_Arduino.cpp`. Tests: 41. Interaction checks (flagged): 6.
 
 
 ## make note i2c
@@ -13,6 +13,11 @@ Source: `src/NoteI2c_Arduino.cpp`. Tests: 40. Interaction checks (flagged): 6.
   <sub>`NoteI2c_Arduino_test.cpp` `test_make_note_i2c_enforces_singleton_by_returning_same_notei2c_object_for_all_calls`</sub>
 - `behavior` — make note i2c deletes singleton when nullptr is passed as parameter  
   <sub>`NoteI2c_Arduino_test.cpp` `test_make_note_i2c_deletes_singleton_when_nullptr_is_passed_as_parameter`</sub>
+
+## general
+
+- `behavior` — make note i2c returns nullptr when nullptr is passed as parameter and no instance exists  
+  <sub>`NoteI2c_Arduino_test.cpp` `test_make_note_i2c_returns_nullptr_when_nullptr_is_passed_as_parameter_and_no_instance_exists`</sub>
 
 ## constructor
 

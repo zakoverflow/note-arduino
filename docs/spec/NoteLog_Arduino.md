@@ -2,7 +2,7 @@
 
 # Spec: NoteLog_Arduino
 
-Source: `src/NoteLog_Arduino.cpp`. Tests: 5. Interaction checks (flagged): 2.
+Source: `src/NoteLog_Arduino.cpp`. Tests: 6. Interaction checks (flagged): 2.
 
 
 ## make note log
@@ -13,6 +13,11 @@ Source: `src/NoteLog_Arduino.cpp`. Tests: 5. Interaction checks (flagged): 2.
   <sub>`NoteLog_Arduino_test.cpp` `test_make_note_log_enforces_singleton_by_returning_same_notelog_object_for_all_calls`</sub>
 - `behavior` — make note log deletes singleton when nullptr is passed as parameter  
   <sub>`NoteLog_Arduino_test.cpp` `test_make_note_log_deletes_singleton_when_nullptr_is_passed_as_parameter`</sub>
+
+## general
+
+- `behavior` — make note log returns nullptr when nullptr is passed as parameter and no instance exists  
+  <sub>`NoteLog_Arduino_test.cpp` `test_make_note_log_returns_nullptr_when_nullptr_is_passed_as_parameter_and_no_instance_exists`</sub>
 
 ## print
 

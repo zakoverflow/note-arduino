@@ -6,13 +6,13 @@ Every line in this folder comes from a test name. No test means no requirement.
 
 | Unit | Tests | Interaction checks (flagged) | File |
 |---|---|---|---|
-| NoteI2c_Arduino | 40 | 6 | [NoteI2c_Arduino.md](NoteI2c_Arduino.md) |
-| NoteLog_Arduino | 5 | 2 | [NoteLog_Arduino.md](NoteLog_Arduino.md) |
-| NoteSerial_Arduino | 20 | 16 | [NoteSerial_Arduino.md](NoteSerial_Arduino.md) |
+| NoteI2c_Arduino | 41 | 6 | [NoteI2c_Arduino.md](NoteI2c_Arduino.md) |
+| NoteLog_Arduino | 6 | 2 | [NoteLog_Arduino.md](NoteLog_Arduino.md) |
+| NoteSerial_Arduino | 21 | 16 | [NoteSerial_Arduino.md](NoteSerial_Arduino.md) |
 | NoteTime_Arduino | 4 | 0 | [NoteTime_Arduino.md](NoteTime_Arduino.md) |
-| NoteTxn_Arduino | 16 | 7 | [NoteTxn_Arduino.md](NoteTxn_Arduino.md) |
+| NoteTxn_Arduino | 21 | 7 | [NoteTxn_Arduino.md](NoteTxn_Arduino.md) |
 | Notecard | 133 | 95 | [Notecard.md](Notecard.md) |
-| **Total** | **218** | **126** | |
+| **Total** | **226** | **126** | |
 
 ## How to read this spec
 

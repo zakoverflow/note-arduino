@@ -67,6 +67,79 @@ TEST_CASE("test_make_note_txn_deletes_singleton_when_same_pins_are_passed_as_par
   CHECK(nullptr == notetxn);
 }
 
+TEST_CASE("test_make_note_txn_deletes_singleton_when_nullptr_is_passed_as_parameter", "[NoteTxn_Arduino]")
+{
+  resetFakes();
+  // Arrange
+  uint8_t txn_pins[2] = {19, 79};
+  NoteTxn * notetxn = make_note_txn(txn_pins);
+  assert(notetxn);
+
+  // Action
+  notetxn = make_note_txn(nullptr);
+
+  // Assert
+  CHECK(nullptr == notetxn);
+}
+
+TEST_CASE("test_make_note_txn_returns_nullptr_when_nullptr_is_passed_as_parameter_and_no_instance_exists", "[NoteTxn_Arduino]")
+{
+  resetFakes();
+  // Arrange
+  // No test leaves an instance behind, so none exists here.
+
+  // Action
+  NoteTxn * const notetxn = make_note_txn(nullptr);
+
+  // Assert
+  CHECK(nullptr == notetxn);
+}
+
+TEST_CASE("test_make_note_txn_returns_nullptr_when_same_pins_are_passed_as_parameter_and_no_instance_exists", "[NoteTxn_Arduino]")
+{
+  resetFakes();
+  // Arrange
+  uint8_t invalid_pins[2] = {0};
+
+  // Action
+  NoteTxn * const notetxn = make_note_txn(invalid_pins);
+
+  // Assert
+  CHECK(nullptr == notetxn);
+}
+
+TEST_CASE("test_make_note_txn_instantiates_notetxn_object_when_pins_are_const", "[NoteTxn_Arduino]")
+{
+  resetFakes();
+  // Arrange
+  const uint8_t txn_pins[2] = {19, 79};
+
+  // Action
+  NoteTxn * const notetxn = make_note_txn(txn_pins);
+
+  // Assert
+  CHECK(nullptr != notetxn);
+
+  // Clean-up
+  make_note_txn(nullptr);
+}
+
+TEST_CASE("test_make_note_txn_deletes_singleton_when_same_pins_are_const_and_passed_as_parameter", "[NoteTxn_Arduino]")
+{
+  resetFakes();
+  // Arrange
+  const uint8_t txn_pins[2] = {19, 79};
+  NoteTxn * notetxn = make_note_txn(txn_pins);
+  assert(notetxn);
+
+  // Action
+  const uint8_t invalid_pins[2] = {0};
+  notetxn = make_note_txn(invalid_pins);
+
+  // Assert
+  CHECK(nullptr == notetxn);
+}
+
 TEST_CASE("test_notetxn_arduino_constructor_floats_ctx_pin", "[NoteTxn_Arduino]")
 {
   resetFakes();

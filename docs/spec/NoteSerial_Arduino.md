@@ -2,7 +2,7 @@
 
 # Spec: NoteSerial_Arduino
 
-Source: `src/NoteSerial_Arduino.cpp`. Tests: 20. Interaction checks (flagged): 16.
+Source: `src/NoteSerial_Arduino.cpp`. Tests: 21. Interaction checks (flagged): 16.
 
 
 ## make note serial
@@ -13,6 +13,11 @@ Source: `src/NoteSerial_Arduino.cpp`. Tests: 20. Interaction checks (flagged): 1
   <sub>`NoteSerial_Arduino_test.cpp` `test_make_note_serial_enforces_singleton_by_returning_same_noteserial_object_for_all_calls`</sub>
 - `behavior` — make note serial deletes singleton when nullptr is passed as parameter  
   <sub>`NoteSerial_Arduino_test.cpp` `test_make_note_serial_deletes_singleton_when_nullptr_is_passed_as_parameter`</sub>
+
+## general
+
+- `behavior` — make note serial returns nullptr when nullptr is passed as parameter and no instance exists  
+  <sub>`NoteSerial_Arduino_test.cpp` `test_make_note_serial_returns_nullptr_when_nullptr_is_passed_as_parameter_and_no_instance_exists`</sub>
 
 ## constructor
 
