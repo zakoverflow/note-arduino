@@ -91,7 +91,6 @@ add_test(NoteTxn_Arduino)
 
 if(NOTE_ARDUINO_COVERAGE)
     find_program(LCOV lcov REQUIRED)
-    find_package(Python3 REQUIRED COMPONENTS Interpreter)
     message(STATUS "Found lcov: ${LCOV}")
 
     option(NOTE_ARDUINO_COVERAGE_EXCEPTION_BRANCHES
@@ -176,10 +175,6 @@ if(NOTE_ARDUINO_COVERAGE)
                 --add-tracefile ${COVERAGE_DIR}/lcov-tests.info
                 --output-file ${COVERAGE_DIR}/lcov.info
         COMMAND lcov --summary --rc ${LCOV_BRANCH_RC} ${COVERAGE_DIR}/lcov.info
-        # 4. Machine-readable totals, per-file numbers and missed counts.
-        COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/coverage_summary.py
-                ${COVERAGE_DIR}/lcov.info ${COVERAGE_DIR}/summary.json
-                --repo ${REPO_ROOT}
         WORKING_DIRECTORY ${REPO_ROOT}
         VERBATIM
     )
