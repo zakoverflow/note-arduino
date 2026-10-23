@@ -187,37 +187,80 @@ def baseline_from(per_file):
             "totals": totals(per_file), "files": kept}
 
 
-def main(argv=None):
+def parse_args(argv):
+    repo = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("tracefile")
     ap.add_argument("baseline")
-    ap.add_argument("--root", default=os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+    ap.add_argument("--root", default=repo,
                     help="directory that holds src/, as written in the tracefile "
                          "(default: the repository of this script)")
-    ap.add_argument("--src-tree", default=os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+    ap.add_argument("--src-tree", default=repo,
                     help="directory that holds src/ on this machine, to list the source files "
                          "(default: the repository of this script)")
     ap.add_argument("--update", action="store_true", help="write the measured counts to the baseline")
     ap.add_argument("--strict", action="store_true", help="fail when the baseline is looser than the measurement")
-    args = ap.parse_args(argv)
+    return ap.parse_args(argv)
+
+
+def read_inputs(args):
+    """Return (measured, baseline, listed, status). status is 2 and the other values are None on bad input."""
     try:
         measured = missed_counts(args.tracefile, args.root)
     except (OSError, ValueError) as err:
         print("ERROR: cannot read the tracefile %s: %s" % (args.tracefile, err))
-        return 2
+        return None, None, None, 2
     if not measured:
         print("ERROR: the tracefile %s has no file under %s/src/ (it is empty, or --root is wrong). Stop."
               % (args.tracefile, normalize_root(args.root)))
-        return 2
+        return None, None, None, 2
     try:
         baseline = load_baseline(args.baseline)
     except (OSError, ValueError) as err:
         print("ERROR: cannot use the baseline %s: %s" % (args.baseline, err))
-        return 2
+        return None, None, None, 2
     listed = source_files(args.src_tree)
     if not listed:
         print("ERROR: no .c or .cpp file under %s/src/ (--src-tree is wrong). Stop." % normalize_root(args.src_tree))
-        return 2
+        return None, None, None, 2
+    return measured, baseline, listed, 0
+
+
+def update_baseline(path, measured, errors):
+    """Write the measured counts to path. Refuse (return 1) when a count is worse."""
+    if errors:
+        print("ERROR: refusing to update. These counts are worse than the baseline:")
+        print("\n".join(errors))
+        return 1
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(baseline_from(measured), fh, indent=2)
+        fh.write("\n")
+    print("Baseline updated.")
+    return 0
+
+
+def verdict(errors, notices, strict):
+    """Print the verdict of a complete measurement and return the exit status."""
+    if notices:
+        print("Notice: the baseline is looser than the measurement, or a file is missing.")
+        print("\n".join(notices))
+        print("Run: python3 scripts/coverage_gate.py <lcov.info> <baseline.json> --update")
+    if errors:
+        print("FAIL: a missed count rose. Add tests for the new or changed code.")
+        print("\n".join(errors))
+        return 1
+    if notices and strict:
+        print("FAIL: the baseline is stale or a file is missing (--strict).")
+        return 1
+    print("PASS: no missed count rose.")
+    return 0
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    measured, baseline, listed, status = read_inputs(args)
+    if status:
+        return status
     missing = [name for name in listed if name not in measured]
     errors, notices, dropped = compare(measured, baseline)
     now = totals(measured)
@@ -232,30 +275,9 @@ def main(argv=None):
             print("\n".join(errors))
         return 1
     if args.update:
-        if errors:
-            print("ERROR: refusing to update. These counts are worse than the baseline:")
-            print("\n".join(errors))
-            return 1
-        with open(args.baseline, "w", encoding="utf-8") as fh:
-            json.dump(baseline_from(measured), fh, indent=2)
-            fh.write("\n")
-        print("Baseline updated.")
-        return 0
-    for name in dropped:
-        notices.append("  %s: the baseline lists it, but the tracefile has no record of it." % name)
-    if notices:
-        print("Notice: the baseline is looser than the measurement, or a file is missing.")
-        print("\n".join(notices))
-        print("Run: python3 scripts/coverage_gate.py <lcov.info> <baseline.json> --update")
-    if errors:
-        print("FAIL: a missed count rose. Add tests for the new or changed code.")
-        print("\n".join(errors))
-        return 1
-    if notices and args.strict:
-        print("FAIL: the baseline is stale or a file is missing (--strict).")
-        return 1
-    print("PASS: no missed count rose.")
-    return 0
+        return update_baseline(args.baseline, measured, errors)
+    notices += ["  %s: the baseline lists it, but the tracefile has no record of it." % name for name in dropped]
+    return verdict(errors, notices, args.strict)
 
 
 if __name__ == "__main__":
