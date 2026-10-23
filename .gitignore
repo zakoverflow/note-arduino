@@ -24,3 +24,6 @@ coverage.json
 
 # Secrets
 *.env
+
+__pycache__/
+*.pyc
