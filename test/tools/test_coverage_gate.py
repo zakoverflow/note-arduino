@@ -125,6 +125,52 @@ class CoverageGateTest(unittest.TestCase):
         self.assertEqual(run.status, 1)
         self.assertIn("src/B.cpp", run.output)
 
+    # Lines and branches are compared apart, per file and in total. A rise in one
+    # kind fails even when the other kind falls by the same amount.
+    @staticmethod
+    def misses(lines, branches):
+        """One file record with this many missed lines and missed branches (and one covered of each)."""
+        return ([0] * lines + [1], [("0", "-")] * branches + [("0", "1")])
+
+    SWAP_BASELINE = {"src/A.cpp": {"lines_missed": 1, "branches_missed": 1}}
+
+    def test_gate_fails_when_a_file_trades_a_missed_branch_for_a_missed_line(self):
+        # File A: 1 line and 1 branch missed in the baseline. Now 2 lines and 0 branches. 2 = 2, but lines rose.
+        run = GateRun(tracefile({"/n/src/A.cpp": self.misses(2, 0)}), baseline(1, 1, self.SWAP_BASELINE), root="/n")
+        self.assertEqual(run.status, 1, run.output)
+        self.assertIn("src/A.cpp: missed lines rose from 1 to 2", run.output)
+
+    def test_gate_fails_when_a_file_trades_a_missed_line_for_a_missed_branch(self):
+        run = GateRun(tracefile({"/n/src/A.cpp": self.misses(0, 2)}), baseline(1, 1, self.SWAP_BASELINE), root="/n")
+        self.assertEqual(run.status, 1, run.output)
+        self.assertIn("src/A.cpp: missed branches rose from 1 to 2", run.output)
+
+    def test_gate_fails_on_a_per_file_rise_in_lines_when_the_total_does_not_rise(self):
+        # B improves, so the totals fall or stay. A still gets worse.
+        base = baseline(2, 2, {"src/A.cpp": {"lines_missed": 1, "branches_missed": 1},
+                               "src/B.cpp": {"lines_missed": 1, "branches_missed": 1}})
+        files = {"/n/src/A.cpp": self.misses(2, 0), "/n/src/B.cpp": self.misses(0, 1)}   # totals 2 and 1
+        run = GateRun(tracefile(files), base, root="/n")
+        self.assertEqual(run.status, 1, run.output)
+        self.assertNotIn("Missed lines rose", run.output)
+        self.assertIn("src/A.cpp: missed lines rose from 1 to 2", run.output)
+
+    def test_gate_fails_on_a_per_file_rise_in_branches_when_the_total_does_not_rise(self):
+        base = baseline(2, 2, {"src/A.cpp": {"lines_missed": 1, "branches_missed": 1},
+                               "src/B.cpp": {"lines_missed": 1, "branches_missed": 1}})
+        files = {"/n/src/A.cpp": self.misses(0, 2), "/n/src/B.cpp": self.misses(1, 0)}   # totals 1 and 2
+        run = GateRun(tracefile(files), base, root="/n")
+        self.assertEqual(run.status, 1, run.output)
+        self.assertNotIn("Missed branches rose", run.output)
+        self.assertIn("src/A.cpp: missed branches rose from 1 to 2", run.output)
+
+    def test_gate_fails_when_the_total_rises_in_one_kind_and_falls_in_the_other(self):
+        # Each file keeps its own count. The baseline totals are tighter than the sum of the files.
+        base = baseline(0, 2, {"src/A.cpp": {"lines_missed": 1, "branches_missed": 1}})
+        run = GateRun(tracefile({"/n/src/A.cpp": self.misses(1, 1)}), base, root="/n")
+        self.assertEqual(run.status, 1, run.output)
+        self.assertIn("Missed lines rose from 0 to 1", run.output)
+
     def test_gate_does_not_count_exception_branches(self):
         only_exception_misses = {SRC: ([1, 1, 0], [("0", "1"), ("e0", "0"), ("e1", "-")])}
         run = GateRun(tracefile(only_exception_misses), baseline(1, 0, {"src/Unit.cpp": {"lines_missed": 1, "branches_missed": 0}}))
@@ -328,7 +374,8 @@ class CoverageGateTest(unittest.TestCase):
     def test_gate_reads_the_source_files_from_the_repository_of_the_script_by_default(self):
         repo = os.path.dirname(os.path.dirname(os.path.realpath(coverage_gate.__file__)))
         listed = coverage_gate.source_files(repo)
-        self.assertIn("src/Notecard.cpp", listed)
+        self.assertTrue(listed)
+        self.assertTrue(all(name.endswith((".c", ".cpp")) for name in listed))
         self.assertTrue(all(name.startswith("src/") and not name.startswith("src/note-c/") for name in listed))
 
     def test_gate_uses_the_repository_of_the_script_as_the_default_root(self):
