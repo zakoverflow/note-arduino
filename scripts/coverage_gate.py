@@ -34,9 +34,17 @@ Rules:
 write counts that are worse than the baseline. To accept worse counts,
 edit the baseline file by hand and explain why in the PR.
 
-Exit status: 0 pass, 1 a missed count rose or a source file has no record
-(or the baseline is stale with --strict), 2 bad input (tracefile or baseline
-missing, empty or malformed, or no source file in the checkout).
+Exit status:
+  0  The gate passes. No missed count rose and every source file has a record.
+     A notice alone does not fail without --strict. --update wrote the baseline.
+  1  A missed line count or a missed branch count rose, in total or in one
+     file (each is compared alone). Or a source file has no record in the
+     tracefile. Or --update refused to write a baseline (a count is worse, or a
+     source file has no record). Or --strict found a notice (a count fell, or a
+     baseline file has no record and is not in the checkout).
+  2  Bad input: the tracefile or the baseline is missing, empty or malformed,
+     the tracefile has no file under <root>/src/, or the checkout has no .c or
+     .cpp file under <src-tree>/src/. A wrong option also exits 2 (argparse).
 """
 import argparse
 import json
