@@ -61,6 +61,19 @@ TEST_CASE("test_make_note_i2c_deletes_singleton_when_nullptr_is_passed_as_parame
   CHECK(nullptr == notei2c);
 }
 
+TEST_CASE("test_make_note_i2c_returns_nullptr_when_nullptr_is_passed_as_parameter_and_no_instance_exists", "[NoteI2c_Arduino]")
+{
+  resetFakes();
+  // Arrange
+  // No test leaves an instance behind, so none exists here.
+
+  // Action
+  NoteI2c * const notei2c = make_note_i2c(nullptr);
+
+  // Assert
+  CHECK(nullptr == notei2c);
+}
+
 TEST_CASE("test_notei2c_arduino_constructor_invokes_twowire_parameter_begin_method", "[NoteI2c_Arduino]")
 {
   resetFakes();
