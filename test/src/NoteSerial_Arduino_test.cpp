@@ -282,15 +282,15 @@ TEST_CASE("test_noteserial_arduino_transmit_writes_the_given_bytes_to_the_serial
     NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
     useFakeSerialPort();
     char buffer[] = "Hello, Test!";
-    const size_t SIZE = strlen(buffer);
-    REQUIRE(12 == SIZE);
+    const size_t EXPECTED_SIZE = 12;
+    REQUIRE(EXPECTED_SIZE == strlen(buffer));
 
     // Action
-    const size_t ACTUAL_RESULT = noteserial.transmit(reinterpret_cast<uint8_t *>(buffer), SIZE, true);
+    const size_t ACTUAL_RESULT = noteserial.transmit(reinterpret_cast<uint8_t *>(buffer), EXPECTED_SIZE, true);
 
     // Assert
     CHECK("Hello, Test!" == fake_serial_port.bytes_written);
-    CHECK(12 == ACTUAL_RESULT);
+    CHECK(EXPECTED_SIZE == ACTUAL_RESULT);
 }
 
 TEST_CASE("test_noteserial_arduino_transmit_invokes_hardware_serial_flush_when_flush_parameter_is_true", "[NoteSerial_Arduino]")
