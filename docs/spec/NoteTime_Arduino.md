@@ -2,6 +2,24 @@
 
 # Spec: NoteTime_Arduino
 
-Status: **no tests**. No requirement is locked for this unit.
+Source: `src/NoteTime_Arduino.cpp`. Tests: 4. Interaction checks (flagged): 0.
 
-Source: `src/NoteTime_Arduino.cpp`. A requirement needs a test first.
+
+## general
+
+- `behavior` — notemillis returns the arduino millisecond count  
+  <sub>`NoteTime_Arduino_test.cpp` `test_notetime_arduino_notemillis_returns_the_arduino_millisecond_count`</sub>
+  - Clock at zero
+  - Clock at one
+  - Clock at an ordinary count
+  - Clock at the largest 32-bit count
+- `behavior` — notemillis reads the arduino clock again on every call  
+  <sub>`NoteTime_Arduino_test.cpp` `test_notetime_arduino_notemillis_reads_the_arduino_clock_again_on_every_call`</sub>
+- `behavior` — notedelay returns after the requested milliseconds have passed  
+  <sub>`NoteTime_Arduino_test.cpp` `test_notetime_arduino_notedelay_returns_after_the_requested_milliseconds_have_passed`</sub>
+  - Delay of zero
+  - Delay of one
+  - Delay of one second
+  - Delay of the largest 32-bit count
+- `behavior` — notedelay adds up when called repeatedly  
+  <sub>`NoteTime_Arduino_test.cpp` `test_notetime_arduino_notedelay_adds_up_when_called_repeatedly`</sub>

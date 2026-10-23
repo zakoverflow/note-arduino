@@ -1,7 +1,7 @@
 {
   "scope": "src/ except src/note-c/; exception branches not counted",
   "totals": {
-    "lines_missed": 11,
+    "lines_missed": 6,
     "branches_missed": 28
   },
   "files": {
@@ -16,10 +16,6 @@
     "src/NoteSerial_Arduino.cpp": {
       "lines_missed": 0,
       "branches_missed": 10
-    },
-    "src/NoteTime_Arduino.cpp": {
-      "lines_missed": 5,
-      "branches_missed": 0
     },
     "src/NoteTxn_Arduino.cpp": {
       "lines_missed": 6,

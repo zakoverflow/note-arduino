@@ -87,6 +87,7 @@ add_test(NoteI2c_Arduino)
 add_test(NoteI2c_Arduino WIRE_HAS_END)
 add_test(NoteLog_Arduino)
 add_test(NoteSerial_Arduino)
+add_test(NoteTime_Arduino)
 add_test(NoteTxn_Arduino)
 
 if(NOTE_ARDUINO_COVERAGE)
