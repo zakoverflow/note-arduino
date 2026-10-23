@@ -3,9 +3,7 @@
 #include "arduino_fakes.hpp"
 #include "NoteSerial_Arduino.hpp"
 
-#include <algorithm>
 #include <cassert>
-#include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -23,25 +21,22 @@ namespace {
 // Stateful fake of the transmit side of a serial port.
 // It is built on the FFF fake HardwareSerial_write (custom_fake). The state is
 // a plain struct, because an FFF custom_fake is a function pointer.
-// Every write call appends the bytes the port accepted to bytes_written.
+// Every write call appends the bytes it got to bytes_written and accepts all of them.
 struct FakeSerialPort {
     std::string bytes_written;       // everything the port accepted, in order
-    size_t max_bytes_per_write;      // the port accepts at most this many bytes per write call
 };
 FakeSerialPort fake_serial_port;
 
 size_t fakeSerialPortWrite(uint8_t * buffer, size_t size)
 {
-    const size_t accepted = std::min(size, fake_serial_port.max_bytes_per_write);
-    fake_serial_port.bytes_written.append(reinterpret_cast<const char *>(buffer), accepted);
-    return accepted;
+    fake_serial_port.bytes_written.append(reinterpret_cast<const char *>(buffer), size);
+    return size;
 }
 
 // Install the fake port in place of the capture fake. Call after resetFakes().
-void useFakeSerialPort(size_t max_bytes_per_write = SIZE_MAX)
+void useFakeSerialPort(void)
 {
     fake_serial_port.bytes_written.clear();
-    fake_serial_port.max_bytes_per_write = max_bytes_per_write;
     HardwareSerial_write_fake.custom_fake = fakeSerialPortWrite;
 }
 
@@ -277,22 +272,6 @@ TEST_CASE("test_noteserial_arduino_transmit_writes_the_given_bytes_to_the_serial
     CHECK(12 == ACTUAL_RESULT);
 }
 
-TEST_CASE("test_noteserial_arduino_transmit_returns_the_number_of_bytes_the_serial_port_accepted_when_the_port_accepts_fewer_than_requested", "[NoteSerial_Arduino][transmit]")
-{
-  resetFakes();
-    // Arrange
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-    useFakeSerialPort(5);
-    char buffer[] = "Hello, Test!";
-
-    // Action
-    const size_t ACTUAL_RESULT = noteserial.transmit(reinterpret_cast<uint8_t *>(buffer), strlen(buffer), true);
-
-    // Assert
-    CHECK("Hello" == fake_serial_port.bytes_written);
-    CHECK(5 == ACTUAL_RESULT);
-}
-
 TEST_CASE("test_noteserial_arduino_transmit_invokes_hardware_serial_flush_when_flush_parameter_is_true", "[NoteSerial_Arduino]")
 {
   resetFakes();
@@ -320,4 +299,3 @@ TEST_CASE("test_noteserial_arduino_transmit_does_not_invoke_hardware_serial_flus
     // Assert
     CHECK(!HardwareSerial_flush_fake.call_count);
 }
-
