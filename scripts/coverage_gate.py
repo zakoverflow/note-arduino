@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fail when the number of MISSED lines or branches rises.
 
-usage: coverage_gate.py <lcov.info> <baseline.json> [--root DIR] [--update] [--strict]
+usage: coverage_gate.py <lcov.info> <baseline.json> [--root DIR] [--src-tree DIR] [--update] [--strict]
 
 The gate compares missed counts, not percentages. A percentage can stay
 the same, or even rise, when new code is added without tests. A missed
@@ -19,15 +19,24 @@ Rules:
     tracefile comes from the Docker image, so CI passes --root /note-arduino.
   * A baseline that is looser than the measurement gives a notice.
     With --strict it fails. Run with --update to tighten it.
-  * A baseline file that has no record in the tracefile gives a notice.
-    With --strict it fails. Run with --update if the file was deleted.
+  * Every source file under src/ must have a record in the tracefile. A source
+    file is a .c or .cpp file under <src-tree>/src/, except src/note-c/. The
+    gate reads the list from the checkout at run time, so the list cannot go
+    stale. A file with no record fails (exit 1) and the gate names it. This
+    holds without --strict too, because the measurement is then incomplete.
+    The check also catches a file with 0 missed lines and 0 missed branches.
+    Header files are not listed: a header that holds no code has no record.
+  * A baseline file that has no record in the tracefile, and that is not a
+    source file of the checkout, gives a notice. With --strict it fails.
+    Run with --update if the file was deleted.
 
 --update writes the measured counts to the baseline file. It refuses to
 write counts that are worse than the baseline. To accept worse counts,
 edit the baseline file by hand and explain why in the PR.
 
-Exit status: 0 pass, 1 a missed count rose (or is stale with --strict),
-2 bad input (tracefile or baseline missing, empty or malformed).
+Exit status: 0 pass, 1 a missed count rose or a source file has no record
+(or the baseline is stale with --strict), 2 bad input (tracefile or baseline
+missing, empty or malformed, or no source file in the checkout).
 """
 import argparse
 import json
@@ -55,6 +64,23 @@ def tracked_path(path, root):
     if rel.startswith("src/") and not rel.startswith("src/note-c/"):
         return rel
     return None
+
+
+def source_files(tree):
+    """Return the sorted names "src/<file>" of the .c and .cpp files under <tree>/src/.
+
+    src/note-c/ is not listed. The names use "/" as separator.
+    """
+    base = os.path.join(tree, "src")
+    names = []
+    for folder, dirs, files in os.walk(base):
+        rel = os.path.relpath(folder, base).replace(os.sep, "/")
+        if rel == "." and "note-c" in dirs:
+            dirs.remove("note-c")
+        for name in files:
+            if name.endswith((".c", ".cpp")):
+                names.append("src/" + name if rel == "." else "src/%s/%s" % (rel, name))
+    return sorted(names)
 
 
 def missed_counts(tracefile, root):
@@ -160,6 +186,9 @@ def main(argv=None):
     ap.add_argument("--root", default=os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
                     help="directory that holds src/, as written in the tracefile "
                          "(default: the repository of this script)")
+    ap.add_argument("--src-tree", default=os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+                    help="directory that holds src/ on this machine, to list the source files "
+                         "(default: the repository of this script)")
     ap.add_argument("--update", action="store_true", help="write the measured counts to the baseline")
     ap.add_argument("--strict", action="store_true", help="fail when the baseline is looser than the measurement")
     args = ap.parse_args(argv)
@@ -177,11 +206,20 @@ def main(argv=None):
     except (OSError, ValueError) as err:
         print("ERROR: cannot use the baseline %s: %s" % (args.baseline, err))
         return 2
+    listed = source_files(args.src_tree)
+    if not listed:
+        print("ERROR: no .c or .cpp file under %s/src/ (--src-tree is wrong). Stop." % normalize_root(args.src_tree))
+        return 2
+    missing = [name for name in listed if name not in measured]
     errors, notices, dropped = compare(measured, baseline)
     now = totals(measured)
     print("Missed lines: %d (baseline %d). Missed branches: %d (baseline %d)." % (
         now["lines_missed"], baseline["totals"]["lines_missed"],
         now["branches_missed"], baseline["totals"]["branches_missed"]))
+    if missing:
+        print("FAIL: the tracefile has no record of a source file. Do not ignore this: the measurement is incomplete.")
+        print("\n".join("  %s: the source file has no record in the tracefile." % name for name in missing))
+        return 1
     if args.update:
         if errors:
             print("ERROR: refusing to update. These counts are worse than the baseline:")

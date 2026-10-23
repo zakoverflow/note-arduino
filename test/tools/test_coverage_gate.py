@@ -37,8 +37,13 @@ class GateRun:
 
     baseline_json is written as JSON. baseline_text is written as it is (use it
     for a baseline that is not valid JSON). None for either leaves no file.
+
+    tree lists the source files of the checkout, for example ["src/A.cpp"]. The
+    gate reads them from a temporary directory (--src-tree). The default is the
+    .c and .cpp files that the tracefile lists under <root>/src/ (not src/note-c/),
+    so a test that does not care about the list sees a complete tracefile.
     """
-    def __init__(self, tracefile_text, baseline_json, *flags, root="/note-arduino", baseline_text=None):
+    def __init__(self, tracefile_text, baseline_json, *flags, root="/note-arduino", baseline_text=None, tree=None):
         self.dir = tempfile.TemporaryDirectory()
         self.trace = os.path.join(self.dir.name, "lcov.info")
         self.base = os.path.join(self.dir.name, "baseline.json")
@@ -51,7 +56,21 @@ class GateRun:
         elif baseline_json is not None:
             with open(self.base, "w") as fh:
                 json.dump(baseline_json, fh)
-        args = [self.trace, self.base] + (["--root", root] if root else []) + list(flags)
+        if tree is None:
+            top = root or os.path.dirname(os.path.dirname(os.path.realpath(coverage_gate.__file__)))
+            prefix = top + "/src/"
+            listed = [line[3:].strip() for line in (tracefile_text or "").splitlines() if line.startswith("SF:")]
+            tree = [name[len(top) + 1:] for name in listed
+                    if name.startswith(prefix) and not name.startswith(prefix + "note-c/")
+                    and name.endswith((".c", ".cpp"))]
+        src_tree = os.path.join(self.dir.name, "checkout")
+        for name in tree:
+            path = os.path.join(src_tree, *name.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            open(path, "w").close()
+        os.makedirs(os.path.join(src_tree, "src"), exist_ok=True)
+        args = ([self.trace, self.base] + (["--root", root] if root else []) +
+                ["--src-tree", src_tree] + list(flags))
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.status = coverage_gate.main(args)
@@ -252,6 +271,65 @@ class CoverageGateTest(unittest.TestCase):
                 run = GateRun(text, baseline(0, 0), "--strict")
                 self.assertEqual(run.status, 0, run.output)
                 self.assertIn("Missed lines: 0 (baseline 0). Missed branches: 0 (baseline 0).", run.output)
+
+    # --- the list of source files ------------------------------------------
+
+    COVERED = ([1, 1], [("0", "1"), ("0", "1")])   # 0 missed lines, 0 missed branches
+    FULL_TREE = ["src/Unit.cpp", "src/Covered.cpp"]
+    ONE_MISS_BASELINE = {"src/Unit.cpp": {"lines_missed": 1, "branches_missed": 1}}
+
+    def test_gate_fails_when_strict_and_the_tracefile_drops_a_fully_covered_source_file(self):
+        dropped = {SRC: ONE_MISS[SRC]}   # src/Covered.cpp has no record
+        run = GateRun(tracefile(dropped), baseline(1, 1, self.ONE_MISS_BASELINE), "--strict", tree=self.FULL_TREE)
+        self.assertEqual(run.status, 1, run.output)
+        self.assertIn("src/Covered.cpp: the source file has no record in the tracefile", run.output)
+
+    def test_gate_fails_when_not_strict_and_the_tracefile_drops_a_fully_covered_source_file(self):
+        dropped = {SRC: ONE_MISS[SRC]}
+        run = GateRun(tracefile(dropped), baseline(1, 1, self.ONE_MISS_BASELINE), tree=self.FULL_TREE)
+        self.assertEqual(run.status, 1, run.output)
+        self.assertIn("src/Covered.cpp", run.output)
+
+    def test_gate_names_every_source_file_that_the_tracefile_drops(self):
+        run = GateRun(tracefile({SRC: ONE_MISS[SRC]}), baseline(1, 1, self.ONE_MISS_BASELINE),
+                      tree=self.FULL_TREE + ["src/sub/Deep.cpp", "src/Plain.c"])
+        self.assertEqual(run.status, 1)
+        for name in ("src/Covered.cpp", "src/sub/Deep.cpp", "src/Plain.c"):
+            self.assertIn(name, run.output)
+
+    def test_gate_names_a_dropped_source_file_once_when_the_baseline_lists_it_too(self):
+        listed = dict(self.ONE_MISS_BASELINE)
+        listed["src/Covered.cpp"] = {"lines_missed": 0, "branches_missed": 0}
+        run = GateRun(tracefile({SRC: ONE_MISS[SRC]}), baseline(1, 1, listed), tree=self.FULL_TREE)
+        self.assertEqual(run.status, 1)
+        self.assertEqual(run.output.count("src/Covered.cpp"), 1, run.output)
+
+    def test_gate_passes_when_the_tracefile_has_a_record_for_every_source_file(self):
+        files = {SRC: ONE_MISS[SRC], "/note-arduino/src/Covered.cpp": self.COVERED}
+        run = GateRun(tracefile(files), baseline(1, 1, self.ONE_MISS_BASELINE), "--strict", tree=self.FULL_TREE)
+        self.assertEqual(run.status, 0, run.output)
+
+    def test_gate_does_not_need_a_record_for_header_files_or_for_note_c(self):
+        run = GateRun(tracefile({SRC: ONE_MISS[SRC]}), baseline(1, 1, self.ONE_MISS_BASELINE), "--strict",
+                      tree=["src/Unit.cpp", "src/Unit.hpp", "src/Defines.h", "src/note-c/note.c", "src/note-c/deep/x.cpp"])
+        self.assertEqual(run.status, 0, run.output)
+
+    def test_update_refuses_to_write_a_baseline_when_the_tracefile_drops_a_source_file(self):
+        original = baseline(1, 1, self.ONE_MISS_BASELINE)
+        run = GateRun(tracefile({SRC: ONE_MISS[SRC]}), original, "--update", tree=self.FULL_TREE)
+        self.assertEqual(run.status, 1)
+        self.assertEqual(run.final_baseline, original)
+
+    def test_gate_stops_with_status_2_when_the_checkout_has_no_source_file(self):
+        run = GateRun(tracefile(ONE_MISS), baseline(1, 1, self.ONE_MISS_BASELINE), tree=[])
+        self.assertEqual(run.status, 2)
+        self.assertIn("--src-tree", run.output)
+
+    def test_gate_reads_the_source_files_from_the_repository_of_the_script_by_default(self):
+        repo = os.path.dirname(os.path.dirname(os.path.realpath(coverage_gate.__file__)))
+        listed = coverage_gate.source_files(repo)
+        self.assertIn("src/Notecard.cpp", listed)
+        self.assertTrue(all(name.startswith("src/") and not name.startswith("src/note-c/") for name in listed))
 
     def test_gate_uses_the_repository_of_the_script_as_the_default_root(self):
         repo = os.path.dirname(os.path.dirname(os.path.realpath(coverage_gate.__file__)))
