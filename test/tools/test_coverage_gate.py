@@ -351,6 +351,13 @@ class CoverageGateTest(unittest.TestCase):
         self.assertEqual(run.status, 1)
         self.assertEqual(run.output.count("src/Covered.cpp"), 1, run.output)
 
+    def test_gate_prints_a_rise_too_when_the_tracefile_drops_a_source_file(self):
+        worse = {SRC: ([1, 0, 0], [("0", "1"), ("0", "-")])}   # missed lines 1 -> 2
+        run = GateRun(tracefile(worse), baseline(1, 1, self.ONE_MISS_BASELINE), tree=self.FULL_TREE)
+        self.assertEqual(run.status, 1, run.output)
+        self.assertIn("src/Covered.cpp: the source file has no record", run.output)
+        self.assertIn("Missed lines rose from 1 to 2", run.output)
+
     def test_gate_passes_when_the_tracefile_has_a_record_for_every_source_file(self):
         files = {SRC: ONE_MISS[SRC], "/note-arduino/src/Covered.cpp": self.COVERED}
         run = GateRun(tracefile(files), baseline(1, 1, self.ONE_MISS_BASELINE), "--strict", tree=self.FULL_TREE)

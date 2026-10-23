@@ -219,6 +219,9 @@ def main(argv=None):
     if missing:
         print("FAIL: the tracefile has no record of a source file. Do not ignore this: the measurement is incomplete.")
         print("\n".join("  %s: the source file has no record in the tracefile." % name for name in missing))
+        if errors:
+            print("A missed count also rose:")
+            print("\n".join(errors))
         return 1
     if args.update:
         if errors:
