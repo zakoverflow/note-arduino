@@ -4,6 +4,7 @@ Run: python3 -m unittest discover -s test/tools -p 'test_*.py'
 Every test feeds a small lcov tracefile and a baseline to the gate and checks
 the exit status and the printed verdict. The tests do not read gate internals.
 """
+import ast
 import contextlib
 import io
 import json
@@ -48,13 +49,13 @@ class GateRun:
         self.trace = os.path.join(self.dir.name, "lcov.info")
         self.base = os.path.join(self.dir.name, "baseline.json")
         if tracefile_text is not None:
-            with open(self.trace, "w") as fh:
+            with open(self.trace, "w", encoding="utf-8") as fh:
                 fh.write(tracefile_text)
         if baseline_text is not None:
-            with open(self.base, "w") as fh:
+            with open(self.base, "w", encoding="utf-8") as fh:
                 fh.write(baseline_text)
         elif baseline_json is not None:
-            with open(self.base, "w") as fh:
+            with open(self.base, "w", encoding="utf-8") as fh:
                 json.dump(baseline_json, fh)
         if tree is None:
             top = root or os.path.dirname(os.path.dirname(os.path.realpath(coverage_gate.__file__)))
@@ -67,7 +68,7 @@ class GateRun:
         for name in tree:
             path = os.path.join(src_tree, *name.split("/"))
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            open(path, "w").close()
+            open(path, "w", encoding="utf-8").close()
         os.makedirs(os.path.join(src_tree, "src"), exist_ok=True)
         args = ([self.trace, self.base] + (["--root", root] if root else []) +
                 ["--src-tree", src_tree] + list(flags))
@@ -76,7 +77,7 @@ class GateRun:
             self.status = coverage_gate.main(args)
         self.output = buf.getvalue()
         try:
-            with open(self.base) as fh:
+            with open(self.base, encoding="utf-8") as fh:
                 self.final_baseline = json.load(fh)
         except (OSError, ValueError):
             self.final_baseline = None
@@ -384,6 +385,32 @@ class CoverageGateTest(unittest.TestCase):
         run = GateRun(tracefile({path: ONE_MISS[SRC]}),
                       baseline(1, 1, {"src/Unit.cpp": {"lines_missed": 1, "branches_missed": 1}}), root="")
         self.assertEqual(run.status, 0)
+
+
+class EncodingTest(unittest.TestCase):
+    """Every open() in the gate and in its tests names an encoding.
+
+    Without encoding=, Python uses the locale of the machine. A path with a
+    non-ASCII character then reads or writes differently on two machines.
+    The check reads the source with ast, so it needs no special Python flag.
+    """
+    FILES = (coverage_gate.__file__, __file__)
+
+    def test_every_open_call_names_an_encoding(self):
+        bad = []
+        for path in self.FILES:
+            with open(path, encoding="utf-8") as fh:
+                tree = ast.parse(fh.read())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "open":
+                    if "encoding" not in [kw.arg for kw in node.keywords]:
+                        bad.append("%s:%d" % (os.path.basename(path), node.lineno))
+        self.assertEqual(bad, [], "open() without encoding=")
+
+    def test_the_gate_reads_a_tracefile_with_a_non_ascii_character(self):
+        text = "TN:Caf\u00e9\n" + tracefile({SRC: ONE_MISS[SRC]})
+        run = GateRun(text, baseline(1, 1, {"src/Unit.cpp": {"lines_missed": 1, "branches_missed": 1}}))
+        self.assertEqual(run.status, 0, run.output)
 
 
 if __name__ == "__main__":

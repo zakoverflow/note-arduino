@@ -225,7 +225,7 @@ def main(argv=None):
             print("ERROR: refusing to update. These counts are worse than the baseline:")
             print("\n".join(errors))
             return 1
-        with open(args.baseline, "w") as fh:
+        with open(args.baseline, "w", encoding="utf-8") as fh:
             json.dump(baseline_from(measured), fh, indent=2)
             fh.write("\n")
         print("Baseline updated.")
