@@ -131,6 +131,18 @@ jobs:
                           "$IMAGE" \
                           --coverage --mem-check
 
+      # The gate runs on the runner, not in the CI image. It reads the lcov
+      # tracefile that "Run tests" wrote. The tracefile comes from the Docker
+      # image, where the repository is at /note-arduino, so the gate gets
+      # --root /note-arduino. The gate uses nothing newer than Python 3.8.
+      - name: Test the coverage gate
+        run: |
+          python3 --version
+          python3 -m unittest discover -s test/tools -p 'test_coverage_gate.py'
+
+      - name: Coverage gate (missed lines and branches must not rise)
+        run: python3 scripts/coverage_gate.py coverage/lcov.info test/coverage-baseline.json --root /note-arduino
+
       - name: Adjust lcov source file paths for Coveralls
         run: sudo sed -i 's/\/note-arduino\///g' ./coverage/lcov.info
 
