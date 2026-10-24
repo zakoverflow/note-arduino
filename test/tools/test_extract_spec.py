@@ -271,6 +271,59 @@ TEST_CASE(
             self.assertIn("Interaction checks (flagged): 1.", spec)
 
 
+class SpecGapTest(unittest.TestCase):
+    GAP = "// SPEC-GAP: start(0) is not specified. No test locks it.\n"
+
+    def test_a_spec_gap_is_the_last_section_of_the_unit_spec(self):
+        with SpecRepo({"Unit_test.cpp": self.GAP + SIMPLE}) as repo:
+            status, out = repo.run()
+            self.assertEqual(status, 0, out)
+            spec = repo.read("docs/spec/Unit.md")
+            self.assertTrue(spec.endswith(
+                "## Open spec gaps\n\n"
+                "The docs do not specify these behaviors. No test locks them.\n\n"
+                "- gap: start(0) is not specified. No test locks it.\n"), spec)
+            self.assertEqual(spec.count("## Open spec gaps"), 1)
+
+    def test_the_readme_shows_the_gap_count(self):
+        text = self.GAP + SIMPLE + "// SPEC-GAP: second gap\n"
+        with SpecRepo({"Unit_test.cpp": text}) as repo:
+            self.assertEqual(repo.run()[0], 0)
+            self.assertIn("no test locks it): 2.", repo.read("docs/spec/README.md"))
+            self.assertIn("- gap: second gap", repo.read("docs/spec/Unit.md"))
+
+    def test_a_unit_with_no_gap_has_no_gap_section_and_the_readme_shows_0(self):
+        with SpecRepo() as repo:
+            self.assertEqual(repo.run()[0], 0)
+            self.assertNotIn("Open spec gaps", repo.read("docs/spec/Unit.md"))
+            self.assertIn("no test locks it): 0.", repo.read("docs/spec/README.md"))
+
+    def test_a_gap_goes_to_the_unit_of_its_test_file_only(self):
+        other = 'TEST_CASE("test_Other_a_b", "[Other]") {}\n'
+        with SpecRepo({"Unit_test.cpp": SIMPLE, "Other_test.cpp": self.GAP + other},
+                      src_units=("Unit", "Other")) as repo:
+            self.assertEqual(repo.run()[0], 0)
+            self.assertIn("- gap: start(0)", repo.read("docs/spec/Other.md"))
+            self.assertNotIn("gap", repo.read("docs/spec/Unit.md"))
+
+    def test_a_gap_is_not_a_test_and_does_not_change_the_test_count(self):
+        with SpecRepo({"Unit_test.cpp": self.GAP + SIMPLE}) as repo:
+            self.assertEqual(repo.run()[0], 0)
+            self.assertIn("| **Total** | **2** |", repo.read("docs/spec/README.md"))
+
+    def test_check_fails_when_a_gap_was_added_and_the_spec_was_not_written_again(self):
+        with SpecRepo() as repo:
+            repo.run()
+            repo.write("test/src/Unit_test.cpp", self.GAP + SIMPLE)
+            self.assertEqual(repo.run("--check")[0], 1)
+
+    def test_script_stops_with_status_2_when_a_gap_has_no_text(self):
+        with SpecRepo({"Unit_test.cpp": "// SPEC-GAP:   \n" + SIMPLE}) as repo:
+            status, out = repo.run()
+            self.assertEqual(status, 2)
+            self.assertIn("SPEC-GAP needs a text", out)
+
+
 class EncodingTest(unittest.TestCase):
     """Every open() in the script and in its tests names an encoding.
 
