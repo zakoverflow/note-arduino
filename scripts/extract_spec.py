@@ -21,9 +21,15 @@ Naming convention that the script relies on:
   The first tag is the unit (module). It must equal the source file stem.
   Extra tags are optional group keys, for example [receive] or [wire].
 
+Comments and string literals: the script removes // and /* */ comments before
+it looks for TEST_CASE. A "TEST_CASE(" in a comment or in a string literal is
+not a test case. (A raw string literal R"(...)" is not supported.)
+
 Cross-check: the script counts each "TEST_CASE(" in the code of a test file
-(also two on one line) and the test cases that it parsed. A difference is an error, so a test case cannot drop out of the
-spec without a message. A marker that has no name or no reason is an error too.
+(also two on one line) and the test cases that it parsed. A difference is an
+error, so a test case cannot drop out of the spec without a message. A marker
+that has no name or no reason is an error too. A TEST_CASE( ... ) can be on
+up to MAX_TEST_CASE_LINES (10) lines. A longer one is an error.
 
 Usage:
   scripts/extract_spec.py            write docs/spec/
@@ -104,6 +110,63 @@ def read_text(path):
         return fh.read()
 
 
+def code_lines(text):
+    """Return two lists, one item for each line of text.
+
+    The first list has the code with the comments replaced by spaces. The
+    second list also has the contents of string and character literals
+    replaced by spaces (the quotes stay). Line numbers do not change.
+    """
+    code = []
+    state = 'code'      # code, block (/* */), line (//), str ("), chr (')
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        two = text[i:i + 2]
+        if c == '\n':
+            if state == 'line':
+                state = 'code'
+            code.append(('\n', '\n'))
+        elif state == 'block':
+            if two == '*/':
+                state = 'code'
+                code.append(('  ', '  '))
+                i += 1
+            else:
+                code.append((' ', ' '))
+        elif state == 'line':
+            code.append((' ', ' '))
+        elif state in ('str', 'chr'):
+            quote = '"' if state == 'str' else "'"
+            if c == '\\' and i + 1 < n and text[i + 1] != '\n':
+                code.append((two, '  '))
+                i += 1
+            elif c == quote:
+                state = 'code'
+                code.append((c, c))
+            else:
+                code.append((c, ' '))
+        elif two == '/*':
+            state = 'block'
+            code.append(('  ', '  '))
+            i += 1
+        elif two == '//':
+            state = 'line'
+            code.append(('  ', '  '))
+            i += 1
+        else:
+            if c == '"':
+                state = 'str'
+            elif c == "'" and not (i > 0 and (text[i - 1].isalnum())):
+                state = 'chr'       # not a C++14 digit separator (1'000)
+            code.append((c, c))
+        i += 1
+    with_literals = ''.join(a for a, _ in code).split('\n')
+    no_literals = ''.join(b for _, b in code).split('\n')
+    return with_literals, no_literals
+
+
 def join_test_case(lines, start):
     """Return the TEST_CASE( ... ) text that begins on lines[start], or None."""
     text = ''
@@ -123,11 +186,14 @@ def parse_tests(test_dir=TEST_DIR, gaps=None):
         if not fn.endswith('_test.cpp'):
             continue
         guards = []
-        lines = read_text(os.path.join(test_dir, fn)).splitlines()
+        text = read_text(os.path.join(test_dir, fn)).replace('\r\n', '\n')
+        lines = text.split('\n')
+        code, bare = code_lines(text)
         pending_exc = None
-        seen = 0        # each "TEST_CASE(" in code (not in a // comment line)
+        seen = 0        # each "TEST_CASE(" in code (not in a comment or a string)
         parsed = 0
-        for i, line in enumerate(lines, 1):
+        for i, raw in enumerate(lines, 1):
+            line = code[i - 1]
             m = IF_RE.match(line)
             if m:
                 guards.append(((m.group(1) + m.group(2)).strip(), False))
@@ -139,14 +205,14 @@ def parse_tests(test_dir=TEST_DIR, gaps=None):
             if ENDIF_RE.match(line) and guards:
                 guards.pop()
                 continue
-            m = GAP_RE.match(line)
+            m = GAP_RE.match(raw) if not line.strip() else None
             if m:
                 if not m.group(1).strip():
                     raise SpecError('%s:%d: SPEC-GAP needs a text: "// SPEC-GAP: <text>"'
                                     % (fn, i))
                 gaps.setdefault(fn[:-len('_test.cpp')], []).append(m.group(1).strip())
                 continue
-            m = EXC_RE.match(line)
+            m = EXC_RE.match(raw) if not line.strip() else None
             if m:
                 body = EXC_BODY_RE.match(m.group(1))
                 if not body:
@@ -154,12 +220,12 @@ def parse_tests(test_dir=TEST_DIR, gaps=None):
                                     '"%s"' % (fn, i, MARKER_FORM))
                 pending_exc = (body.group(1), body.group(2).strip())
                 continue
-            if line.lstrip().startswith('//'):
+            if not line.strip():
                 continue
-            starts = len(TC_START_RE.findall(line))
+            starts = len(TC_START_RE.findall(bare[i - 1]))
             if starts:
                 seen += starts
-                joined = join_test_case(lines, i - 1)
+                joined = join_test_case(code, i - 1)
                 m = TC_RE.search(joined) if joined else None
                 if not m:
                     raise SpecError('%s:%d: cannot parse this TEST_CASE. Use '

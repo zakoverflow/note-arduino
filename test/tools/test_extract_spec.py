@@ -120,6 +120,33 @@ TEST_CASE(
             self.assertEqual(status, 0, out)
             self.assertNotIn("old is not a test", repo.read("docs/spec/Unit.md"))
 
+    def test_script_ignores_a_test_case_that_is_in_a_block_comment(self):
+        text = SIMPLE + ('/*\nTEST_CASE("test_Unit_old_is_not_a_test", "[Unit]")\n{\n}\n*/\n'
+                         '/* TEST_CASE("test_Unit_inline_is_not_a_test", "[Unit]") */\n')
+        with SpecRepo({"Unit_test.cpp": text}) as repo:
+            status, out = repo.run()
+            self.assertEqual(status, 0, out)
+            spec = repo.read("docs/spec/Unit.md")
+            self.assertNotIn("is not a test", spec)
+            self.assertIn("Tests: 2.", spec)
+
+    def test_script_ignores_test_case_text_in_a_string_or_after_a_trailing_comment(self):
+        text = SIMPLE + ('TEST_CASE("test_Unit_print_writes_text", "[Unit]")  // was TEST_CASE("x"\n'
+                         '{\n    const char *s = "TEST_CASE(\\"y\\", ";  /* TEST_CASE( */\n}\n')
+        with SpecRepo({"Unit_test.cpp": text}) as repo:
+            status, out = repo.run()
+            self.assertEqual(status, 0, out)
+            spec = repo.read("docs/spec/Unit.md")
+            self.assertIn("Tests: 3.", spec)
+            self.assertIn("print writes text", spec)
+
+    def test_script_keeps_the_line_number_after_a_block_comment(self):
+        text = '/* one\n two */\nTEST_CASE("test_Unit_a_b", "[Unit]") {} TEST_CASE("test_Unit_c_d", "[Unit]") {}\n'
+        with SpecRepo({"Unit_test.cpp": text}) as repo:
+            status, out = repo.run()
+            self.assertEqual(status, 2, out)
+            self.assertIn('Unit_test.cpp: 2 "TEST_CASE(" found but 1 test cases were parsed', out)
+
     def test_script_stops_with_status_2_when_there_is_no_test_case(self):
         with SpecRepo({"Unit_test.cpp": "// nothing\n"}) as repo:
             status, out = repo.run()
