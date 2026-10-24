@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 SCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "scripts")
 sys.path.insert(0, SCRIPT_DIR)
@@ -325,6 +326,55 @@ TEST_CASE(
             self.assertIn("- `interaction` — begin invokes wire begin", spec)
             self.assertIn("- `behavior` — begin returns true", spec)
             self.assertIn("Interaction checks (flagged): 1.", spec)
+
+
+class OutputOrderTest(unittest.TestCase):
+    """The output does not depend on the directory order or on the hash seed."""
+
+    UNITS = ("Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel")
+
+    def make_repo(self):
+        tests = {}
+        for u in self.UNITS[:6]:
+            tests[u + "_test.cpp"] = ('// SPEC-GAP: gap of %s\n'
+                                      'TEST_CASE("test_%s_begin_works", "[%s]") {}\n'
+                                      'TEST_CASE("test_Shared_%s_works", "[Shared]") {}\n'
+                                      % (u, u, u, u))
+        return SpecRepo(tests, src_units=self.UNITS)
+
+    @staticmethod
+    def spec_files(repo):
+        d = os.path.join(repo.root, "docs/spec")
+        return {fn: repo.read("docs/spec/" + fn) for fn in os.listdir(d)}
+
+    def test_output_is_byte_identical_when_the_directory_order_changes(self):
+        real_listdir = os.listdir
+        results = []
+        for order in (sorted, lambda x: sorted(x, reverse=True),
+                      lambda x: sorted(x, key=lambda n: n[::-1])):
+            def listdir(path, order=order):
+                return order(real_listdir(path))
+            with self.make_repo() as repo:
+                with unittest.mock.patch.object(extract_spec.os, "listdir", listdir):
+                    self.assertEqual(repo.run()[0], 0)
+                results.append(self.spec_files(repo))
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[0], results[2])
+        self.assertIn("Alpha", results[0]["README.md"])
+
+    def test_output_is_byte_identical_for_each_hash_seed(self):
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); import extract_spec; "
+                "sys.exit(extract_spec.main([], root=sys.argv[2]))")
+        results = []
+        for seed in ("0", "1", "2", "3", "4", "5"):
+            with self.make_repo() as repo:
+                env = dict(os.environ, PYTHONHASHSEED=seed)
+                r = subprocess.run([sys.executable, "-c", code, SCRIPT_DIR, repo.root],
+                                   env=env, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                results.append(self.spec_files(repo))
+        for other in results[1:]:
+            self.assertEqual(results[0], other)
 
 
 class SpecGapTest(unittest.TestCase):
