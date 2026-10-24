@@ -8,7 +8,12 @@ What the script reads (test/src/*_test.cpp):
   TEST_CASE("<name>", "[<Unit>][<tag>]...")   one requirement per test case
                                                (it can be on more than one line)
   SECTION("<name>")                            sub-requirement of a test case
-  #if / #ifdef guards around a test case       build variant of the requirement
+  #if / #ifdef / #ifndef / #else / #endif      build variant of the requirement. The
+                                               spec shows the condition of each guard
+                                               around the test case, for example
+                                               "X defined", "X not defined", "N > 1"
+                                               or "not (N > 1)" after #else. #elif and
+                                               an #else or #endif with no #if are errors.
   // IMPL-CHECK-EXCEPTION: <name>: <reason>   comment directly above a test case
   // SPEC-GAP: <text>                          comment anywhere in a test file. It names
                                                a behavior that the docs do not specify and
@@ -51,7 +56,9 @@ TC_START_RE = re.compile(r'\b\w*TEST_CASE\w*\(')
 TC_RE = re.compile(r'\bTEST_CASE\(\s*"([^"]+)"\s*,\s*"([^"]*)"\s*\)')
 SEC_RE = re.compile(r'^\s*SECTION\(\s*"([^"]+)"')
 IF_RE = re.compile(r'^\s*#\s*(if|ifdef|ifndef)\b(.*)$')
-ELSE_RE = re.compile(r'^\s*#\s*(else|elif)\b')
+ELSE_RE = re.compile(r'^\s*#\s*else\b')
+ELIF_RE = re.compile(r'^\s*#\s*elif\b')
+DEFINED_RE = re.compile(r'^(!|not\s+)?\s*defined\s*(?:\(\s*(\w+)\s*\)|\s(\w+))$')
 ENDIF_RE = re.compile(r'^\s*#\s*endif\b')
 EXC_RE = re.compile(r'^\s*//\s*IMPL-CHECK-EXCEPTION:(.*)$')
 # The one form of the marker. The error message and docs/spec/README.md use
@@ -167,6 +174,20 @@ def code_lines(text):
     return with_literals, no_literals
 
 
+def guard_condition(directive, expr, in_else):
+    """Return the text of the condition of one guard, for example "X defined"."""
+    expr = ' '.join(expr.split())
+    if directive in ('ifdef', 'ifndef'):
+        cond, negative = expr + ' defined', directive == 'ifndef'
+        name = expr
+    else:
+        m = DEFINED_RE.match(expr)
+        if not m:
+            return 'not (%s)' % expr if in_else else expr
+        name, negative = m.group(2) or m.group(3), bool(m.group(1))
+    return '%s %s' % (name, 'defined' if negative == in_else else 'not defined')
+
+
 def join_test_case(lines, start):
     """Return the TEST_CASE( ... ) text that begins on lines[start], or None."""
     text = ''
@@ -196,14 +217,18 @@ def parse_tests(test_dir=TEST_DIR, gaps=None):
             line = code[i - 1]
             m = IF_RE.match(line)
             if m:
-                guards.append(((m.group(1) + m.group(2)).strip(), False))
+                guards.append([m.group(1), m.group(2), False, i])
                 continue
-            if ELSE_RE.match(line) and guards:
-                g, _ = guards[-1]
-                guards[-1] = (g, True)
-                continue
-            if ENDIF_RE.match(line) and guards:
-                guards.pop()
+            if ELIF_RE.match(line):
+                raise SpecError('%s:%d: #elif is not supported. Use #if, #else and #endif'
+                                % (fn, i))
+            if ELSE_RE.match(line) or ENDIF_RE.match(line):
+                if not guards:
+                    raise SpecError('%s:%d: this #else or #endif has no #if' % (fn, i))
+                if ELSE_RE.match(line):
+                    guards[-1][2] = True
+                else:
+                    guards.pop()
                 continue
             m = GAP_RE.match(raw) if not line.strip() else None
             if m:
@@ -233,11 +258,7 @@ def parse_tests(test_dir=TEST_DIR, gaps=None):
                                     'literals' % (fn, i))
                 name, tagstr = m.groups()
                 tags = re.findall(r'\[([^\]]+)\]', tagstr)
-                variant = ''
-                for g, neg in guards:
-                    if 'WIRE_HAS_END' in g:
-                        variant = ('WIRE_HAS_END defined' if ('not' in g or 'ifndef' in g) == neg
-                                   else 'WIRE_HAS_END not defined')
+                variant = ' and '.join(guard_condition(d, e, el) for d, e, el, _ in guards)
                 tests.append(dict(file=fn, line=i, name=name, tags=tags,
                                   unit=tags[0] if tags else fn[:-9],
                                   variant=variant, exception=pending_exc,
@@ -253,6 +274,8 @@ def parse_tests(test_dir=TEST_DIR, gaps=None):
                     raise SpecError('%s: an IMPL-CHECK-EXCEPTION comment is not directly above a '
                                     'TEST_CASE (it is above line %d)' % (fn, i))
                 pending_exc = None
+        if guards:
+            raise SpecError('%s:%d: this #%s has no #endif' % (fn, guards[-1][3], guards[-1][0]))
         if seen != parsed:
             raise SpecError('%s: %d "TEST_CASE(" found but %d test cases were parsed'
                             % (fn, seen, parsed))

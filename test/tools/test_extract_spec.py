@@ -162,6 +162,35 @@ TEST_CASE(
             self.assertIn("variant: WIRE_HAS_END", spec)
             self.assertIn("  - first", spec)
 
+    def test_script_shows_the_condition_of_every_guard_around_a_test(self):
+        def tc(n):
+            return 'TEST_CASE("test_Unit_%s_works", "[Unit]") {}\n' % n
+        text = ('#ifndef ARDUINO_ARCH_ESP32\n' + tc('a') + '#else\n' + tc('b') + '#endif\n'
+                '#if !defined(USE_SPI) // comment\n' + tc('c') + '#else\n' + tc('d') + '#endif\n'
+                '#if NOTE_LEVEL > 1\n' + tc('e') + '#else\n'
+                '# ifdef USE_I2C\n' + tc('f') + '# endif\n#endif\n' + tc('g'))
+        with SpecRepo({"Unit_test.cpp": text}) as repo:
+            status, out = repo.run()
+            self.assertEqual(status, 0, out)
+            spec = repo.read("docs/spec/Unit.md")
+            for n, v in (("a", "ARDUINO_ARCH_ESP32 not defined"), ("b", "ARDUINO_ARCH_ESP32 defined"),
+                         ("c", "USE_SPI not defined"), ("d", "USE_SPI defined"),
+                         ("e", "NOTE_LEVEL > 1"), ("f", "not (NOTE_LEVEL > 1) and USE_I2C defined")):
+                self.assertIn("%s works _[variant: %s]_" % (n, v), spec)
+            self.assertIn("g works  \n", spec)
+
+    def test_script_stops_with_status_2_on_a_guard_that_it_cannot_follow(self):
+        tc = 'TEST_CASE("test_Unit_a_b", "[Unit]") {}\n'
+        cases = (("#if A\n" + tc + "#elif B\n#endif\n", "Unit_test.cpp:3: #elif is not supported"),
+                 (tc + "#endif\n", "Unit_test.cpp:2: this #else or #endif has no #if"),
+                 (tc + "#else\n", "Unit_test.cpp:2: this #else or #endif has no #if"),
+                 ("#ifdef A\n" + tc, "Unit_test.cpp:1: this #ifdef has no #endif"))
+        for text, message in cases:
+            with SpecRepo({"Unit_test.cpp": text}) as repo:
+                status, out = repo.run()
+                self.assertEqual(status, 2, out)
+                self.assertIn(message, out)
+
     def test_script_shows_an_exception_marker_with_its_name_and_reason(self):
         text = ('// IMPL-CHECK-EXCEPTION: end_calls_wire_end: the call is the only visible effect\n'
                 'TEST_CASE("test_Unit_end_calls_wire_end", "[Unit]") {}\n')
