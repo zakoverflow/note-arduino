@@ -275,51 +275,22 @@ TEST_CASE("test_noteserial_arduino_transmit_returns_the_number_of_bytes_the_seri
     CHECK(5 == ACTUAL_RESULT);
 }
 
-TEST_CASE("test_noteserial_arduino_transmit_invokes_hardware_serial_write", "[NoteSerial_Arduino]")
+TEST_CASE("test_noteserial_arduino_transmit_writes_the_given_bytes_to_the_serial_port_in_order_and_returns_the_size", "[NoteSerial_Arduino][transmit]")
 {
   resetFakes();
     // Arrange
     NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-
-    RESET_CAPTURE_FAKE(HardwareSerial_write);
-
-    // Action
-    noteserial.transmit(reinterpret_cast<uint8_t *>(const_cast<char *>("Hello, Test!")), 13, true);
-
-    // Assert
-    CHECK(HardwareSerial_write_fake.call_count);
-}
-
-TEST_CASE("test_noteserial_arduino_transmit_does_not_modify_buffer_parameter_value_before_passing_to_hardware_serial_write", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-    const char EXPECTED_RESULT[] = "Hello, Test!";
-
-    RESET_CAPTURE_FAKE(HardwareSerial_write);
+    useFakeSerialPort();
+    char buffer[] = "Hello, Test!";
+    const size_t EXPECTED_SIZE = 12;
+    REQUIRE(EXPECTED_SIZE == strlen(buffer));
 
     // Action
-    noteserial.transmit(reinterpret_cast<uint8_t *>(const_cast<char *>(EXPECTED_RESULT)), strlen(EXPECTED_RESULT), true);
+    const size_t ACTUAL_RESULT = noteserial.transmit(reinterpret_cast<uint8_t *>(buffer), EXPECTED_SIZE, true);
 
     // Assert
-    CHECK(!strcmp(EXPECTED_RESULT, HardwareSerial_write_arg0_str.c_str()));
-}
-
-TEST_CASE("test_noteserial_arduino_transmit_does_not_modify_size_parameter_value_before_passing_to_hardware_serial_write", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-    const size_t EXPECTED_RESULT = 13;
-
-    RESET_CAPTURE_FAKE(HardwareSerial_write);
-
-    // Action
-    noteserial.transmit(reinterpret_cast<uint8_t *>(const_cast<char *>("Hello, Test!")), EXPECTED_RESULT, true);
-
-    // Assert
-    CHECK(EXPECTED_RESULT == HardwareSerial_write_fake.arg1_val);
+    CHECK("Hello, Test!" == fake_serial_port.bytes_written);
+    CHECK(EXPECTED_SIZE == ACTUAL_RESULT);
 }
 
 TEST_CASE("test_noteserial_arduino_transmit_invokes_hardware_serial_flush_when_flush_parameter_is_true", "[NoteSerial_Arduino]")
@@ -348,21 +319,4 @@ TEST_CASE("test_noteserial_arduino_transmit_does_not_invoke_hardware_serial_flus
 
     // Assert
     CHECK(!HardwareSerial_flush_fake.call_count);
-}
-
-TEST_CASE("test_noteserial_arduino_transmit_does_not_modify_hardware_serial_write_result_value_before_returning_to_caller", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    const size_t EXPECTED_RESULT = 13;
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-
-    RESET_CAPTURE_FAKE(HardwareSerial_write);
-    HardwareSerial_write_fake.return_val = EXPECTED_RESULT;
-
-    // Action
-    const size_t ACTUAL_RESULT = noteserial.transmit(reinterpret_cast<uint8_t *>(const_cast<char *>("Hello, Test!")), 13, true);
-
-    // Assert
-    CHECK(ACTUAL_RESULT == EXPECTED_RESULT);
 }
