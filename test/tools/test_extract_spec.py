@@ -153,7 +153,7 @@ TEST_CASE(
                 self.assertIn("quote is read", spec, prefix)
 
     def test_script_reads_a_digit_separator_as_part_of_a_number(self):
-        text = SIMPLE + ("int n = 1'000'000 + 0xFF'FF + 0b1'0;\n"
+        text = SIMPLE + ("int n = 1'000'000 + 0xFF'FF + 0b1'0; auto c = u8'a'; auto d = L'0';\n"
                          'TEST_CASE("test_Unit_number_is_read", "[Unit]") {}\n')
         with SpecRepo({"Unit_test.cpp": text}) as repo:
             status, out = repo.run()
