@@ -278,6 +278,20 @@ TEST_CASE(
             self.assertEqual(repo.run()[0], 0)
             self.assertIn("no tests", repo.read("docs/spec/Lonely.md"))
 
+    def test_every_spec_file_ends_with_one_newline(self):
+        tests = {"Unit_test.cpp": SIMPLE, "Gap_test.cpp": "// SPEC-GAP: a gap\n"}
+        with SpecRepo(tests, src_units=("Unit", "Empty")) as repo:
+            self.assertEqual(repo.run()[0], 0)
+            for fn in ("Unit.md", "Empty.md", "Gap.md", "README.md"):
+                text = repo.read("docs/spec/" + fn)
+                self.assertTrue(text.endswith("\n") and not text.endswith("\n\n"), fn)
+
+    def test_check_tells_how_to_make_the_spec_up_to_date(self):
+        with SpecRepo() as repo:
+            status, out = repo.run("--check")
+            self.assertEqual(status, 1, out)
+            self.assertIn('Run "python3 scripts/extract_spec.py"', out)
+
     def test_script_warns_when_the_first_tag_is_not_the_unit_of_the_file(self):
         with SpecRepo({"Unit_test.cpp": 'TEST_CASE("test_Other_a_b", "[Other]") {}\n'}) as repo:
             status, out = repo.run()
@@ -390,6 +404,16 @@ class SpecGapTest(unittest.TestCase):
                 "The docs do not specify these behaviors. No test locks them.\n\n"
                 "- gap: start(0) is not specified. No test locks it.\n"), spec)
             self.assertEqual(spec.count("## Open spec gaps"), 1)
+
+    def test_a_unit_that_has_only_gaps_gets_a_spec_file(self):
+        tests = {"Unit_test.cpp": SIMPLE, "Other_test.cpp": self.GAP}
+        with SpecRepo(tests) as repo:
+            status, out = repo.run()
+            self.assertEqual(status, 0, out)
+            spec = repo.read("docs/spec/Other.md")
+            self.assertIn("Status: **no tests**", spec)
+            self.assertTrue(spec.endswith("- gap: start(0) is not specified. No test locks it.\n"))
+            self.assertIn("| Other | 0 | 0 | [Other.md](Other.md) |", repo.read("docs/spec/README.md"))
 
     def test_the_readme_shows_the_gap_count(self):
         text = self.GAP + SIMPLE + "// SPEC-GAP: second gap\n"

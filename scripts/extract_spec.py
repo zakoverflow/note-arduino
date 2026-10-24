@@ -310,7 +310,8 @@ def render(tests, units_in_src=None, gaps=None):
         if not ts:
             L += ['Status: **no tests**. No requirement is locked for this unit.\n',
                   'Source: `src/%s.cpp`. A requirement needs a test first.\n' % u]
-            out[u + '.md'] = '\n'.join(L + gap_section(gaps.get(u)))
+            # The last line of L ends with a newline. A gap line does not.
+            out[u + '.md'] = '\n'.join(L + gap_section(gaps.get(u))).rstrip('\n') + '\n'
             continue
         inter = sum(1 for t in ts if INTERACTION_RE.search(t['name']))
         L += ['Source: `src/%s.cpp`. Tests: %d. Interaction checks (flagged): %d.\n'
@@ -392,7 +393,8 @@ def main(argv=None, root=ROOT):
                 stale.append(fn)
         extra = set(os.listdir(spec_dir)) - set(out) if os.path.isdir(spec_dir) else set()
         if stale or extra:
-            print('spec is out of date: %s %s' % (sorted(stale), sorted(extra)))
+            print('spec is out of date: %s %s. Run "python3 scripts/extract_spec.py" and '
+                  'commit docs/spec/.' % (sorted(stale), sorted(extra)))
             return 1
         print('spec is up to date (%d tests, %d files)' % (len(tests), len(out)))
         return 0
