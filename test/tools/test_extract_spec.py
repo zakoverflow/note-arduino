@@ -141,6 +141,25 @@ TEST_CASE(
             self.assertIn("Tests: 3.", spec)
             self.assertIn("print writes text", spec)
 
+    def test_script_finds_a_test_case_after_a_prefixed_char_literal(self):
+        for prefix in ("L", "u8", "u", "U"):
+            text = SIMPLE + ("static const auto q = %s'\"';\n"
+                             'TEST_CASE("test_Unit_quote_is_read", "[Unit]") {}\n' % prefix)
+            with SpecRepo({"Unit_test.cpp": text}) as repo:
+                status, out = repo.run()
+                self.assertEqual(status, 0, prefix + out)
+                spec = repo.read("docs/spec/Unit.md")
+                self.assertIn("Tests: 3.", spec, prefix)
+                self.assertIn("quote is read", spec, prefix)
+
+    def test_script_reads_a_digit_separator_as_part_of_a_number(self):
+        text = SIMPLE + ("int n = 1'000'000 + 0xFF'FF + 0b1'0;\n"
+                         'TEST_CASE("test_Unit_number_is_read", "[Unit]") {}\n')
+        with SpecRepo({"Unit_test.cpp": text}) as repo:
+            status, out = repo.run()
+            self.assertEqual(status, 0, out)
+            self.assertIn("Tests: 3.", repo.read("docs/spec/Unit.md"))
+
     def test_script_keeps_the_line_number_after_a_block_comment(self):
         text = '/* one\n two */\nTEST_CASE("test_Unit_a_b", "[Unit]") {} TEST_CASE("test_Unit_c_d", "[Unit]") {}\n'
         with SpecRepo({"Unit_test.cpp": text}) as repo:

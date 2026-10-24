@@ -71,6 +71,8 @@ GAP_RE = re.compile(r'^\s*//\s*SPEC-GAP:(.*)$')
 # The longest TEST_CASE( ... ) that the script joins from several lines.
 MAX_TEST_CASE_LINES = 10
 
+HEX_DIGITS = '0123456789abcdefABCDEF'
+
 
 class SpecError(Exception):
     """The tests cannot be parsed. main() prints the message and returns 2."""
@@ -165,13 +167,30 @@ def code_lines(text):
         else:
             if c == '"':
                 state = 'str'
-            elif c == "'" and not (i > 0 and (text[i - 1].isalnum())):
-                state = 'chr'       # not a C++14 digit separator (1'000)
+            elif c == "'" and not is_digit_separator(text, i):
+                state = 'chr'       # also L'x', u8'x', u'x' and U'x'
             code.append((c, c))
         i += 1
     with_literals = ''.join(a for a, _ in code).split('\n')
     no_literals = ''.join(b for _, b in code).split('\n')
     return with_literals, no_literals
+
+
+def is_digit_separator(text, i):
+    """Return True when the ' at text[i] is a C++14 digit separator (1'000, 0xFF'FF).
+
+    The ' must be in a number (the token starts with a digit) and have a
+    hex digit on each side. Otherwise it opens a character literal, also
+    after a prefix such as L, u8, u or U.
+    """
+    if i == 0 or i + 1 >= len(text):
+        return False
+    if text[i - 1] not in HEX_DIGITS or text[i + 1] not in HEX_DIGITS:
+        return False
+    j = i
+    while j > 0 and (text[j - 1].isalnum() or text[j - 1] in "_'."):
+        j -= 1
+    return text[j].isdigit()
 
 
 def guard_condition(directive, expr, in_else):
