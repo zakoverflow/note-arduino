@@ -135,10 +135,10 @@ jobs:
       # tracefile that "Run tests" wrote. The tracefile comes from the Docker
       # image, where the repository is at /note-arduino, so the gate gets
       # --root /note-arduino. The gate uses nothing newer than Python 3.8.
-      - name: Test the coverage gate
+      - name: Test the Python tools
         run: |
           python3 --version
-          python3 -m unittest discover -s test/tools -p 'test_coverage_gate.py'
+          python3 -m unittest discover -s test/tools -p 'test_*.py'
 
       - name: Coverage gate (missed lines and branches must not rise)
         run: python3 scripts/coverage_gate.py coverage/lcov.info test/coverage-baseline.json --root /note-arduino
