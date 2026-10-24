@@ -160,6 +160,26 @@ TEST_CASE(
             self.assertEqual(status, 0, out)
             self.assertIn("Tests: 3.", repo.read("docs/spec/Unit.md"))
 
+    def test_script_finds_a_test_case_after_an_escaped_quote_in_a_string(self):
+        text = SIMPLE + ('const char *s = "a \\"b\\" TEST_CASE(\\"c\\", ";\n'
+                         'TEST_CASE("test_Unit_escape_is_read", "[Unit]") {}\n')
+        with SpecRepo({"Unit_test.cpp": text}) as repo:
+            status, out = repo.run()
+            self.assertEqual(status, 0, out)
+            spec = repo.read("docs/spec/Unit.md")
+            self.assertIn("Tests: 3.", spec)
+            self.assertIn("escape is read", spec)
+
+    def test_script_finds_a_test_case_after_a_char_literal_that_is_a_quote(self):
+        text = SIMPLE + ("char q = '\"'; char b = '\\''; const char *t = \"TEST_CASE(\";\n"
+                         'TEST_CASE("test_Unit_char_is_read", "[Unit]") {}\n')
+        with SpecRepo({"Unit_test.cpp": text}) as repo:
+            status, out = repo.run()
+            self.assertEqual(status, 0, out)
+            spec = repo.read("docs/spec/Unit.md")
+            self.assertIn("Tests: 3.", spec)
+            self.assertIn("char is read", spec)
+
     def test_script_keeps_the_line_number_after_a_block_comment(self):
         text = '/* one\n two */\nTEST_CASE("test_Unit_a_b", "[Unit]") {} TEST_CASE("test_Unit_c_d", "[Unit]") {}\n'
         with SpecRepo({"Unit_test.cpp": text}) as repo:
