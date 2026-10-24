@@ -207,12 +207,19 @@ def guard_condition(directive, expr, in_else):
     return '%s %s' % (name, 'defined' if negative == in_else else 'not defined')
 
 
-def join_test_case(lines, start):
-    """Return the TEST_CASE( ... ) text that begins on lines[start], or None."""
+def join_test_case(lines, bare, start):
+    """Return the TEST_CASE( ... ) text that begins on lines[start], or None.
+
+    The brackets are counted in bare (the same lines with the contents of
+    the literals removed), so a ")" in a string does not end the TEST_CASE.
+    """
     text = ''
-    for line in lines[start:start + MAX_TEST_CASE_LINES]:
-        text += line + '\n'
-        if text.count('(') <= text.count(')'):
+    opened = 0
+    end = min(start + MAX_TEST_CASE_LINES, len(lines))
+    for k in range(start, end):
+        text += lines[k] + '\n'
+        opened += bare[k].count('(') - bare[k].count(')')
+        if opened <= 0:
             return text
     return None
 
@@ -269,7 +276,7 @@ def parse_tests(test_dir=TEST_DIR, gaps=None):
             starts = len(TC_START_RE.findall(bare[i - 1]))
             if starts:
                 seen += starts
-                joined = join_test_case(code, i - 1)
+                joined = join_test_case(code, bare, i - 1)
                 m = TC_RE.search(joined) if joined else None
                 if not m:
                     raise SpecError('%s:%d: cannot parse this TEST_CASE. Use '

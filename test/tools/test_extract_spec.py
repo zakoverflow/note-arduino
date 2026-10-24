@@ -180,6 +180,17 @@ TEST_CASE(
             self.assertIn("Tests: 3.", spec)
             self.assertIn("char is read", spec)
 
+    def test_script_reads_a_test_case_whose_name_has_a_bracket(self):
+        text = SIMPLE + ('TEST_CASE("test_Unit_begin_returns_false (no device)",\n'
+                         '          "[Unit]")\n{\n}\n'
+                         'const char *s = "a \\"TEST_CASE(\\" b"; TEST_CASE("test_Unit_c_d", "[Unit]") {}\n')
+        with SpecRepo({"Unit_test.cpp": text}) as repo:
+            status, out = repo.run()
+            self.assertEqual(status, 0, out)
+            spec = repo.read("docs/spec/Unit.md")
+            self.assertIn("Tests: 4.", spec)
+            self.assertIn("`test_Unit_begin_returns_false (no device)`", spec)
+
     def test_script_keeps_the_line_number_after_a_block_comment(self):
         text = '/* one\n two */\nTEST_CASE("test_Unit_a_b", "[Unit]") {} TEST_CASE("test_Unit_c_d", "[Unit]") {}\n'
         with SpecRepo({"Unit_test.cpp": text}) as repo:
