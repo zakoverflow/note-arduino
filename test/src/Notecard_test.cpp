@@ -22,6 +22,114 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+
+namespace {
+
+// Stateful fakes for Notecard::begin(NoteI2c*) bus path (X5 begin-i2c-bus).
+// Unique names for merge with #22–#26. Captures NoteSetFnI2CDefault (I2C set),
+// NoteSetFnI2C clears (I2C null), and NoteI2c_* effects when hooks forward.
+
+struct FakeNoteCBeginI2cBusHooks {
+    uint32_t address;
+    uint32_t mtu;
+    i2cResetFn reset;
+    i2cTransmitFn transmit;
+    i2cReceiveFn receive;
+};
+FakeNoteCBeginI2cBusHooks fake_note_c_begin_i2c_bus_hooks;
+
+struct FakeNoteCBeginI2cBusEffects {
+    uint16_t last_reset_addr;
+    bool reset_return;
+    uint16_t last_tx_addr;
+    uint16_t last_tx_size;
+    const char * tx_return;
+    uint16_t last_rx_addr;
+    uint16_t last_rx_size;
+    const char * rx_return;
+};
+FakeNoteCBeginI2cBusEffects fake_note_c_begin_i2c_bus_effects;
+
+void fakeNoteSetFnI2CDefaultBeginI2cBus(uint32_t address, uint32_t mtu, i2cResetFn reset, i2cTransmitFn transmit, i2cReceiveFn receive)
+{
+    fake_note_c_begin_i2c_bus_hooks.address = address;
+    fake_note_c_begin_i2c_bus_hooks.mtu = mtu;
+    fake_note_c_begin_i2c_bus_hooks.reset = reset;
+    fake_note_c_begin_i2c_bus_hooks.transmit = transmit;
+    fake_note_c_begin_i2c_bus_hooks.receive = receive;
+}
+
+void fakeNoteSetFnI2CBeginI2cBus(uint32_t address, uint32_t mtu, i2cResetFn reset, i2cTransmitFn transmit, i2cReceiveFn receive)
+{
+    fake_note_c_begin_i2c_bus_hooks.address = address;
+    fake_note_c_begin_i2c_bus_hooks.mtu = mtu;
+    fake_note_c_begin_i2c_bus_hooks.reset = reset;
+    fake_note_c_begin_i2c_bus_hooks.transmit = transmit;
+    fake_note_c_begin_i2c_bus_hooks.receive = receive;
+}
+
+bool fakeNoteI2cResetBeginI2cBus(uint16_t address)
+{
+    fake_note_c_begin_i2c_bus_effects.last_reset_addr = address;
+    return fake_note_c_begin_i2c_bus_effects.reset_return;
+}
+
+const char * fakeNoteI2cTransmitBeginI2cBus(uint16_t address, uint8_t *, uint16_t size)
+{
+    fake_note_c_begin_i2c_bus_effects.last_tx_addr = address;
+    fake_note_c_begin_i2c_bus_effects.last_tx_size = size;
+    return fake_note_c_begin_i2c_bus_effects.tx_return;
+}
+
+const char * fakeNoteI2cReceiveBeginI2cBus(uint16_t address, uint8_t *, uint16_t size, uint32_t *)
+{
+    fake_note_c_begin_i2c_bus_effects.last_rx_addr = address;
+    fake_note_c_begin_i2c_bus_effects.last_rx_size = size;
+    return fake_note_c_begin_i2c_bus_effects.rx_return;
+}
+
+// Call after resetFakes(). Captures NoteSetFnI2CDefault (I2C present path).
+void useFakeNoteCBeginI2cBusDefaults(void)
+{
+    fake_note_c_begin_i2c_bus_hooks.address = 0;
+    fake_note_c_begin_i2c_bus_hooks.mtu = 0;
+    fake_note_c_begin_i2c_bus_hooks.reset = nullptr;
+    fake_note_c_begin_i2c_bus_hooks.transmit = nullptr;
+    fake_note_c_begin_i2c_bus_hooks.receive = nullptr;
+    NoteSetFnI2CDefault_fake.custom_fake = fakeNoteSetFnI2CDefaultBeginI2cBus;
+}
+
+// Call after resetFakes(). Captures NoteSetFnI2C clears (I2C nullptr path).
+// Sentinels start non-zero/non-null so a skipped clear fails.
+void useFakeNoteCBeginI2cBusClears(void)
+{
+    fake_note_c_begin_i2c_bus_hooks.address = NOTE_I2C_ADDR_DEFAULT;
+    fake_note_c_begin_i2c_bus_hooks.mtu = NOTE_I2C_MTU_DEFAULT;
+    fake_note_c_begin_i2c_bus_hooks.reset = reinterpret_cast<i2cResetFn>(0x1);
+    fake_note_c_begin_i2c_bus_hooks.transmit = reinterpret_cast<i2cTransmitFn>(0x1);
+    fake_note_c_begin_i2c_bus_hooks.receive = reinterpret_cast<i2cReceiveFn>(0x1);
+    NoteSetFnI2C_fake.custom_fake = fakeNoteSetFnI2CBeginI2cBus;
+}
+
+// Call after resetFakes() (and typically after begin). Captures NoteI2c_* so
+// installed noteI2cReset/Transmit/Receive hooks can be shown to forward.
+void useFakeNoteI2cBeginI2cBus(void)
+{
+    fake_note_c_begin_i2c_bus_effects.last_reset_addr = 0;
+    fake_note_c_begin_i2c_bus_effects.reset_return = false;
+    fake_note_c_begin_i2c_bus_effects.last_tx_addr = 0;
+    fake_note_c_begin_i2c_bus_effects.last_tx_size = 0;
+    fake_note_c_begin_i2c_bus_effects.tx_return = nullptr;
+    fake_note_c_begin_i2c_bus_effects.last_rx_addr = 0;
+    fake_note_c_begin_i2c_bus_effects.last_rx_size = 0;
+    fake_note_c_begin_i2c_bus_effects.rx_return = nullptr;
+    NoteI2c_reset_fake.custom_fake = fakeNoteI2cResetBeginI2cBus;
+    NoteI2c_transmit_fake.custom_fake = fakeNoteI2cTransmitBeginI2cBus;
+    NoteI2c_receive_fake.custom_fake = fakeNoteI2cReceiveBeginI2cBus;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -232,268 +340,205 @@ TEST_CASE("test_notecard_begin_i2c_sets_millis_function_pointer_to_nullptr_when_
   CHECK(!NoteSetFnDefault_fake.arg3_val);
 }
 
-TEST_CASE("test_notecard_begin_i2c_does_not_modify_i2c_address_parameter_before_passing_to_note_c", "[Notecard]")
+// X5 begin-i2c-bus outcomes: I2C address/MTU and reset/transmit/receive hooks
+// from begin(NoteI2c*). Tags: [Notecard][begin-i2c-bus].
+TEST_CASE("test_notecard_begin_i2c_registers_the_supplied_i2c_address_when_i2c_is_set", "[Notecard][begin-i2c-bus]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
-  // 0x1B binary representation => 0001 1011
-  const uint16_t EXPECTED_ADDRESS = 0x1B;
-
+  // Arrange
+  useFakeNoteCBeginI2cBusDefaults();
+  const uint32_t ADDRESS = 0x1B;
   Notecard notecard;
   NoteI2c_Fake fakeI2c;
-  RESET_FAKE(NoteSetFnI2CDefault);
 
-   // Action
-  ///////////
+  // Action
+  notecard.begin(&fakeI2c, ADDRESS);
 
-  notecard.begin(&fakeI2c, EXPECTED_ADDRESS);
-
-   // Assert
-  ///////////
-
-  CHECK(EXPECTED_ADDRESS == NoteSetFnI2CDefault_fake.arg0_val);
+  // Assert
+  CHECK(ADDRESS == fake_note_c_begin_i2c_bus_hooks.address);
 }
 
-TEST_CASE("test_notecard_begin_i2c_sets_i2c_address_parameter_to_zero_before_passing_to_note_c_when_interface_has_not_been_instantiated", "[Notecard]")
+TEST_CASE("test_notecard_begin_i2c_clears_i2c_address_to_zero_when_i2c_is_null", "[Notecard][begin-i2c-bus]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
-  // 0x1B binary representation => 0001 1011
-  const uint16_t SUPPLIED_ADDRESS = 0x1B;
-
+  // Arrange
+  useFakeNoteCBeginI2cBusClears();
   Notecard notecard;
-  RESET_FAKE(NoteSetFnI2C);
-  NoteSetFnI2C_fake.arg0_val = NOTE_I2C_ADDR_DEFAULT;
 
-   // Action
-  ///////////
+  // Action
+  notecard.begin(static_cast<NoteI2c *>(nullptr), 0x1B);
 
-  notecard.begin(static_cast<NoteI2c *>(nullptr), SUPPLIED_ADDRESS);
-
-   // Assert
-  ///////////
-
-  CHECK(!NoteSetFnI2C_fake.arg0_val);
+  // Assert
+  CHECK(0 == fake_note_c_begin_i2c_bus_hooks.address);
 }
 
-TEST_CASE("test_notecard_begin_i2c_does_not_modify_i2c_mtu_parameter_before_passing_to_note_c", "[Notecard]")
+TEST_CASE("test_notecard_begin_i2c_registers_the_supplied_i2c_mtu_when_i2c_is_set", "[Notecard][begin-i2c-bus]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
-  const uint32_t EXPECTED_RESULT = 79;
-
+  // Arrange
+  useFakeNoteCBeginI2cBusDefaults();
+  const uint32_t MTU = 79;
   Notecard notecard;
   NoteI2c_Fake fakeI2c;
-  RESET_FAKE(NoteSetFnI2CDefault);
 
-   // Action
-  ///////////
+  // Action
+  notecard.begin(&fakeI2c, 0x1B, MTU);
 
-  notecard.begin(&fakeI2c, 0x1B, EXPECTED_RESULT);
-
-   // Assert
-  ///////////
-
-  CHECK(EXPECTED_RESULT == NoteSetFnI2CDefault_fake.arg1_val);
+  // Assert
+  CHECK(MTU == fake_note_c_begin_i2c_bus_hooks.mtu);
 }
 
-TEST_CASE("test_notecard_begin_i2c_sets_i2c_mtu_parameter_to_zero_before_passing_to_note_c_when_interface_has_not_been_instantiated", "[Notecard]")
+TEST_CASE("test_notecard_begin_i2c_clears_i2c_mtu_to_zero_when_i2c_is_null", "[Notecard][begin-i2c-bus]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
-  const uint32_t SUPPLIED_VALUE = 79;
-
+  // Arrange
+  useFakeNoteCBeginI2cBusClears();
   Notecard notecard;
-  RESET_FAKE(NoteSetFnI2C);
-  NoteSetFnI2C_fake.arg1_val = NOTE_I2C_MAX_DEFAULT;
 
-   // Action
-  ///////////
+  // Action
+  notecard.begin(static_cast<NoteI2c *>(nullptr), 0x1B, 79);
 
-  notecard.begin(static_cast<NoteI2c *>(nullptr), 0x1B, SUPPLIED_VALUE);
-
-   // Assert
-  ///////////
-
-  CHECK(!NoteSetFnI2C_fake.arg1_val);
+  // Assert
+  CHECK(0 == fake_note_c_begin_i2c_bus_hooks.mtu);
 }
 
-TEST_CASE("test_notecard_begin_i2c_shares_an_i2c_reset_function_pointer", "[Notecard]")
+TEST_CASE("test_notecard_begin_i2c_installs_a_reset_hook_that_forwards_to_the_i2c_interface_when_i2c_is_set", "[Notecard][begin-i2c-bus]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCBeginI2cBusDefaults();
+  useFakeNoteI2cBeginI2cBus();
+  fake_note_c_begin_i2c_bus_effects.reset_return = true;
   Notecard notecard;
   NoteI2c_Fake fakeI2c;
-  RESET_FAKE(NoteSetFnI2CDefault);
+  const uint16_t ADDR = 0x17;
 
-   // Action
-  ///////////
-
+  // Action
   notecard.begin(&fakeI2c);
 
-   // Assert
-  ///////////
-
-  CHECK(NoteSetFnI2CDefault_fake.arg2_val);
+  // Assert
+  REQUIRE(nullptr != fake_note_c_begin_i2c_bus_hooks.reset);
+  CHECK(true == fake_note_c_begin_i2c_bus_hooks.reset(ADDR));
+  CHECK(ADDR == fake_note_c_begin_i2c_bus_effects.last_reset_addr);
 }
 
-TEST_CASE("test_notecard_begin_i2c_sets_i2c_reset_function_pointer_to_nullptr_when_interface_has_not_been_instantiated", "[Notecard]")
+TEST_CASE("test_notecard_begin_i2c_leaves_no_reset_hook_when_i2c_is_null", "[Notecard][begin-i2c-bus]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCBeginI2cBusClears();
   Notecard notecard;
-  RESET_FAKE(NoteSetFnI2C);
-  NoteSetFnI2C_fake.arg2_val = reinterpret_cast<i2cResetFn>(0x19790917);
 
-   // Action
-  ///////////
-
+  // Action
   notecard.begin(static_cast<NoteI2c *>(nullptr));
 
-   // Assert
-  ///////////
-
-  CHECK(!NoteSetFnI2C_fake.arg2_val);
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_i2c_bus_hooks.reset);
 }
 
-TEST_CASE("test_notecard_begin_i2c_shares_an_i2c_transmit_function_pointer", "[Notecard]")
+TEST_CASE("test_notecard_begin_i2c_installs_a_transmit_hook_that_forwards_to_the_i2c_interface_when_i2c_is_set", "[Notecard][begin-i2c-bus]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCBeginI2cBusDefaults();
+  useFakeNoteI2cBeginI2cBus();
+  static const char * const ERR = "tx-ok";
+  fake_note_c_begin_i2c_bus_effects.tx_return = ERR;
   Notecard notecard;
   NoteI2c_Fake fakeI2c;
-  RESET_FAKE(NoteSetFnI2CDefault);
+  uint8_t buf[2] = {0xA, 0xB};
+  const uint16_t ADDR = 0x17;
 
-   // Action
-  ///////////
-
+  // Action
   notecard.begin(&fakeI2c);
 
-   // Assert
-  ///////////
-
-  CHECK(NoteSetFnI2CDefault_fake.arg3_val);
+  // Assert
+  REQUIRE(nullptr != fake_note_c_begin_i2c_bus_hooks.transmit);
+  CHECK(ERR == fake_note_c_begin_i2c_bus_hooks.transmit(ADDR, buf, 2));
+  CHECK(ADDR == fake_note_c_begin_i2c_bus_effects.last_tx_addr);
+  CHECK(2 == fake_note_c_begin_i2c_bus_effects.last_tx_size);
 }
 
-TEST_CASE("test_notecard_begin_i2c_sets_i2c_transmit_function_pointer_to_nullptr_when_interface_has_not_been_instantiated", "[Notecard]")
+TEST_CASE("test_notecard_begin_i2c_leaves_no_transmit_hook_when_i2c_is_null", "[Notecard][begin-i2c-bus]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCBeginI2cBusClears();
   Notecard notecard;
-  RESET_FAKE(NoteSetFnI2C);
-  NoteSetFnI2C_fake.arg3_val = reinterpret_cast<i2cTransmitFn>(0x19790917);
 
-   // Action
-  ///////////
-
+  // Action
   notecard.begin(static_cast<NoteI2c *>(nullptr));
 
-   // Assert
-  ///////////
-
-  CHECK(!NoteSetFnI2C_fake.arg3_val);
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_i2c_bus_hooks.transmit);
 }
 
-TEST_CASE("test_notecard_begin_i2c_shares_an_i2c_receive_function_pointer", "[Notecard]")
+TEST_CASE("test_notecard_begin_i2c_installs_a_receive_hook_that_forwards_to_the_i2c_interface_when_i2c_is_set", "[Notecard][begin-i2c-bus]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCBeginI2cBusDefaults();
+  useFakeNoteI2cBeginI2cBus();
+  static const char * const ERR = "rx-ok";
+  fake_note_c_begin_i2c_bus_effects.rx_return = ERR;
   Notecard notecard;
   NoteI2c_Fake fakeI2c;
-  RESET_FAKE(NoteSetFnI2CDefault);
+  uint8_t buf[4];
+  uint32_t available = 0;
+  const uint16_t ADDR = 0x17;
 
-   // Action
-  ///////////
-
+  // Action
   notecard.begin(&fakeI2c);
 
-   // Assert
-  ///////////
-
-  CHECK(NoteSetFnI2CDefault_fake.arg4_val);
+  // Assert
+  REQUIRE(nullptr != fake_note_c_begin_i2c_bus_hooks.receive);
+  CHECK(ERR == fake_note_c_begin_i2c_bus_hooks.receive(ADDR, buf, 4, &available));
+  CHECK(ADDR == fake_note_c_begin_i2c_bus_effects.last_rx_addr);
+  CHECK(4 == fake_note_c_begin_i2c_bus_effects.last_rx_size);
 }
 
-TEST_CASE("test_notecard_begin_i2c_sets_i2c_receive_function_pointer_to_nullptr_when_interface_has_not_been_instantiated", "[Notecard]")
+TEST_CASE("test_notecard_begin_i2c_leaves_no_receive_hook_when_i2c_is_null", "[Notecard][begin-i2c-bus]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCBeginI2cBusClears();
   Notecard notecard;
-  RESET_FAKE(NoteSetFnI2C);
-  NoteSetFnI2C_fake.arg4_val = reinterpret_cast<i2cReceiveFn>(0x19790917);
 
-   // Action
-  ///////////
-
+  // Action
   notecard.begin(static_cast<NoteI2c *>(nullptr));
 
-   // Assert
-  ///////////
-
-  CHECK(!NoteSetFnI2C_fake.arg4_val);
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_i2c_bus_hooks.receive);
 }
 
-TEST_CASE("test_notecard_begin_i2c_default_parameter_for_i2cMax_is_passed_to_note_c", "[Notecard]")
+TEST_CASE("test_notecard_begin_i2c_registers_default_mtu_when_mtu_argument_is_omitted", "[Notecard][begin-i2c-bus]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCBeginI2cBusDefaults();
   Notecard notecard;
   NoteI2c_Fake fakeI2c;
-  RESET_FAKE(NoteSetFnI2CDefault);
-  NoteSetFnI2CDefault_fake.arg1_val = (NOTE_I2C_MAX_DEFAULT - 1);
 
-   // Action
-  ///////////
-
+  // Action — address supplied; MTU uses default
   notecard.begin(&fakeI2c, 0x1B);
 
-   // Assert
-  ///////////
-
-  CHECK(NOTE_I2C_MAX_DEFAULT == NoteSetFnI2CDefault_fake.arg1_val);
+  // Assert
+  CHECK(NOTE_I2C_MTU_DEFAULT == fake_note_c_begin_i2c_bus_hooks.mtu);
 }
 
-TEST_CASE("test_notecard_begin_i2c_default_parameter_for_i2cAddress_is_passed_to_note_c", "[Notecard]")
+TEST_CASE("test_notecard_begin_i2c_registers_default_address_when_address_argument_is_omitted", "[Notecard][begin-i2c-bus]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCBeginI2cBusDefaults();
   Notecard notecard;
   NoteI2c_Fake fakeI2c;
-  RESET_FAKE(NoteSetFnI2CDefault);
-  NoteSetFnI2CDefault_fake.arg0_val = (NOTE_I2C_ADDR_DEFAULT - 1);
 
-   // Action
-  ///////////
-
+  // Action — both address and MTU use defaults
   notecard.begin(&fakeI2c);
 
-   // Assert
-  ///////////
-
-  CHECK(NOTE_I2C_ADDR_DEFAULT == NoteSetFnI2CDefault_fake.arg0_val);
+  // Assert
+  CHECK(NOTE_I2C_ADDR_DEFAULT == fake_note_c_begin_i2c_bus_hooks.address);
 }
 
 TEST_CASE("test_notecard_begin_serial_sets_user_agent_to_note_arduino", "[Notecard]")
