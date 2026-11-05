@@ -103,8 +103,6 @@ extern SoftwareSerial SoftSerial;
 extern TwoWire Wire;
 
 // note-c API
-#define NoteDebugWithLevel(...)
-#define NoteDebugWithLevelLn(...)
 #ifdef NoteDeleteResponse
 #undef NoteDeleteResponse
 #endif
@@ -119,6 +117,8 @@ DECLARE_FAKE_VALUE_FUNC(J *, JAddIntToObject, J *, const char *, JINTEGER);
 DECLARE_FAKE_VOID_FUNC(MockNoteDeleteResponse, J *);
 DECLARE_FAKE_VALUE_FUNC(bool, MockNoteResponseError, J *);
 DECLARE_FAKE_VOID_FUNC(NoteDebug, const char *);
+DECLARE_FAKE_VOID_FUNC(NoteDebugWithLevel, uint8_t, const char *);
+DECLARE_FAKE_VOID_FUNC(NoteDebugWithLevelLn, uint8_t, const char *);
 DECLARE_FAKE_VALUE_FUNC(bool, NoteDebugSyncStatus, int, int);
 DECLARE_FAKE_VOID_FUNC(NoteDelayMs, uint32_t);
 DECLARE_FAKE_VOID_FUNC(NoteGetFnI2C, uint32_t *, uint32_t *, i2cResetFn *, i2cTransmitFn *, i2cReceiveFn *);

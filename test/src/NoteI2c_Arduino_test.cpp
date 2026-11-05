@@ -1101,3 +1101,40 @@ TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_unexpected_i2c
   CHECK(ACTUAL_RESULT);
   CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
 }
+
+// SPEC-NOTE: Decision Q-D6 option A. When a try fails and a retry follows,
+// SPEC-NOTE: receive() writes at least one log message. The text and the level
+// SPEC-NOTE: of the log are not specified. The count of two is not locked.
+// SPEC-NOTE: Source: src/NoteI2c_Arduino.cpp (NOTE_C_LOG_ERROR / NOTE_C_LOG_WARN
+// SPEC-NOTE: on the retry path). No document states a log count or log text.
+TEST_CASE("test_notei2c_arduino_receive_logs_a_message_when_it_retries", "[NoteI2c_Arduino][receive]")
+{
+  resetFakes();
+  // Arrange — one failed try, then success (same shape as the retry tests)
+  const uint16_t EXPECTED_ADDRESS = 0x17;
+  const uint8_t REQUEST_SIZE = 13;
+  uint8_t response_buffer[32];
+  uint32_t bytes_remaining;
+
+  RESET_FAKE(TwoWire_beginTransmission);
+  RESET_FAKE(TwoWire_write_byte);
+  RESET_FAKE(TwoWire_endTransmission);
+  SET_RETURN_SEQ_THEN_ZERO(TwoWire_endTransmission, uint8_t, 1, 0);
+  RESET_FAKE(TwoWire_requestFrom);
+  TwoWire_requestFrom_fake.return_val = (REQUEST_SIZE + NoteI2c::REQUEST_HEADER_SIZE);
+  RESET_FAKE(TwoWire_read);
+  SET_RETURN_SEQ_THEN_ZERO(TwoWire_read, int, 0, REQUEST_SIZE, 'T', 'e', 's', 't', ' ', 'P', 'a', 's', 's', 'e', 'd', '!', '\0');
+  NoteI2c_Arduino notei2c(Wire);
+
+  // Action
+  const char * const ACTUAL_RESULT = notei2c.receive(
+    EXPECTED_ADDRESS,
+    response_buffer,
+    REQUEST_SIZE,
+    &bytes_remaining
+  );
+
+  // Assert — retry succeeded; at least one NOTE_C_LOG_* message was emitted
+  REQUIRE(nullptr == ACTUAL_RESULT);
+  CHECK(NoteDebugWithLevelLn_fake.call_count >= 1);
+}
