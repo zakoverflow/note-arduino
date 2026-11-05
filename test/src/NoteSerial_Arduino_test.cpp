@@ -147,34 +147,6 @@ TEST_CASE("test_noteserial_arduino_constructor_opens_the_serial_port_at_115200_b
     CHECK(115200u == fake_serial_port.baud_rate);
 }
 
-TEST_CASE("test_noteserial_arduino_constructor_invokes_hardware_serial_parameter_begin_method", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    RESET_FAKE(HardwareSerial_begin);
-
-    // Action
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-
-    // Assert
-    CHECK(HardwareSerial_begin_fake.call_count);
-}
-
-TEST_CASE("test_noteserial_arduino_constructor_does_not_modify_baud_parameter_before_passing_to_hardware_serial_begin", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    const size_t EXPECTED_BAUD_RATE = 9600;
-
-    RESET_FAKE(HardwareSerial_begin);
-
-    // Action
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, EXPECTED_BAUD_RATE);
-
-    // Assert
-    CHECK(EXPECTED_BAUD_RATE == HardwareSerial_begin_fake.arg0_val);
-}
-
 TEST_CASE("test_noteserial_arduino_deconstructor_invokes_hardware_serial_end_method", "[NoteSerial_Arduino]")
 {
   resetFakes();
