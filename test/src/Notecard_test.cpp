@@ -22,6 +22,204 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+
+namespace {
+
+// Stateful fakes for Notecard::begin(NoteSerial*) (X5 begin-serial).
+// Unique names for merge with #22–#27. Captures user-agent, platform
+// NoteSetFnDefault/NoteSetFn, serial NoteSetFnSerialDefault/NoteSetFnSerial,
+// noteDelay/noteMillis, and NoteSerial_* effects when hooks forward.
+
+struct FakeNoteCBeginSerialUserAgent {
+    char text[64];
+};
+FakeNoteCBeginSerialUserAgent fake_note_c_begin_serial_ua;
+
+struct FakeNoteCBeginSerialPlatformHooks {
+    mallocFn malloc_hook;
+    freeFn free_hook;
+    delayMsFn delay_hook;
+    getMsFn millis_hook;
+};
+FakeNoteCBeginSerialPlatformHooks fake_note_c_begin_serial_platform;
+
+struct FakeNoteCBeginSerialBusHooks {
+    serialResetFn reset;
+    serialTransmitFn transmit;
+    serialAvailableFn available;
+    serialReceiveFn receive;
+};
+FakeNoteCBeginSerialBusHooks fake_note_c_begin_serial_bus;
+
+struct FakeNoteCBeginSerialEffects {
+    uint32_t last_delay_ms;
+    uint32_t millis_return;
+    bool reset_return;
+    bool reset_called;
+    size_t last_tx_len;
+    bool last_tx_flush;
+    size_t tx_return;
+    bool available_return;
+    bool available_called;
+    char receive_return;
+};
+FakeNoteCBeginSerialEffects fake_note_c_begin_serial_effects;
+
+void fakeNoteSetUserAgentBeginSerial(char * agent)
+{
+    if (agent) {
+        strncpy(fake_note_c_begin_serial_ua.text, agent,
+                     sizeof(fake_note_c_begin_serial_ua.text) - 1);
+        fake_note_c_begin_serial_ua.text[sizeof(fake_note_c_begin_serial_ua.text) - 1] = '\0';
+    } else {
+        fake_note_c_begin_serial_ua.text[0] = '\0';
+    }
+}
+
+void fakeNoteSetFnDefaultBeginSerial(mallocFn malloc_hook, freeFn free_hook, delayMsFn delay_hook, getMsFn millis_hook)
+{
+    fake_note_c_begin_serial_platform.malloc_hook = malloc_hook;
+    fake_note_c_begin_serial_platform.free_hook = free_hook;
+    fake_note_c_begin_serial_platform.delay_hook = delay_hook;
+    fake_note_c_begin_serial_platform.millis_hook = millis_hook;
+}
+
+void fakeNoteSetFnBeginSerial(mallocFn malloc_hook, freeFn free_hook, delayMsFn delay_hook, getMsFn millis_hook)
+{
+    fake_note_c_begin_serial_platform.malloc_hook = malloc_hook;
+    fake_note_c_begin_serial_platform.free_hook = free_hook;
+    fake_note_c_begin_serial_platform.delay_hook = delay_hook;
+    fake_note_c_begin_serial_platform.millis_hook = millis_hook;
+}
+
+void fakeNoteSetFnSerialDefaultBeginSerial(serialResetFn reset, serialTransmitFn transmit, serialAvailableFn available, serialReceiveFn receive)
+{
+    fake_note_c_begin_serial_bus.reset = reset;
+    fake_note_c_begin_serial_bus.transmit = transmit;
+    fake_note_c_begin_serial_bus.available = available;
+    fake_note_c_begin_serial_bus.receive = receive;
+}
+
+void fakeNoteSetFnSerialBeginSerial(serialResetFn reset, serialTransmitFn transmit, serialAvailableFn available, serialReceiveFn receive)
+{
+    fake_note_c_begin_serial_bus.reset = reset;
+    fake_note_c_begin_serial_bus.transmit = transmit;
+    fake_note_c_begin_serial_bus.available = available;
+    fake_note_c_begin_serial_bus.receive = receive;
+}
+
+void fakeNoteDelayBeginSerial(uint32_t ms)
+{
+    fake_note_c_begin_serial_effects.last_delay_ms = ms;
+}
+
+uint32_t fakeNoteMillisBeginSerial(void)
+{
+    return fake_note_c_begin_serial_effects.millis_return;
+}
+
+bool fakeNoteSerialResetBeginSerial(void)
+{
+    fake_note_c_begin_serial_effects.reset_called = true;
+    return fake_note_c_begin_serial_effects.reset_return;
+}
+
+size_t fakeNoteSerialTransmitBeginSerial(uint8_t *, size_t len, bool flush)
+{
+    fake_note_c_begin_serial_effects.last_tx_len = len;
+    fake_note_c_begin_serial_effects.last_tx_flush = flush;
+    return fake_note_c_begin_serial_effects.tx_return;
+}
+
+size_t fakeNoteSerialAvailableBeginSerial(void)
+{
+    fake_note_c_begin_serial_effects.available_called = true;
+    return fake_note_c_begin_serial_effects.available_return ? 1u : 0u;
+}
+
+char fakeNoteSerialReceiveBeginSerial(void)
+{
+    return fake_note_c_begin_serial_effects.receive_return;
+}
+
+// Call after resetFakes(). Captures the user-agent string NoteSetUserAgent receives.
+void useFakeNoteCBeginSerialUserAgent(void)
+{
+    fake_note_c_begin_serial_ua.text[0] = '\0';
+    NoteSetUserAgent_fake.custom_fake = fakeNoteSetUserAgentBeginSerial;
+}
+
+// Call after resetFakes(). Captures NoteSetFnDefault (serial present path).
+void useFakeNoteCBeginSerialPlatformDefaults(void)
+{
+    fake_note_c_begin_serial_platform.malloc_hook = nullptr;
+    fake_note_c_begin_serial_platform.free_hook = nullptr;
+    fake_note_c_begin_serial_platform.delay_hook = nullptr;
+    fake_note_c_begin_serial_platform.millis_hook = nullptr;
+    NoteSetFnDefault_fake.custom_fake = fakeNoteSetFnDefaultBeginSerial;
+}
+
+// Call after resetFakes(). Captures NoteSetFn clears (serial nullptr path).
+// Sentinels start non-null so a skipped clear fails.
+void useFakeNoteCBeginSerialPlatformClears(void)
+{
+    fake_note_c_begin_serial_platform.malloc_hook = reinterpret_cast<mallocFn>(0x1);
+    fake_note_c_begin_serial_platform.free_hook = reinterpret_cast<freeFn>(0x1);
+    fake_note_c_begin_serial_platform.delay_hook = reinterpret_cast<delayMsFn>(0x1);
+    fake_note_c_begin_serial_platform.millis_hook = reinterpret_cast<getMsFn>(0x1);
+    NoteSetFn_fake.custom_fake = fakeNoteSetFnBeginSerial;
+}
+
+// Call after resetFakes(). Captures NoteSetFnSerialDefault (serial present path).
+void useFakeNoteCBeginSerialBusDefaults(void)
+{
+    fake_note_c_begin_serial_bus.reset = nullptr;
+    fake_note_c_begin_serial_bus.transmit = nullptr;
+    fake_note_c_begin_serial_bus.available = nullptr;
+    fake_note_c_begin_serial_bus.receive = nullptr;
+    NoteSetFnSerialDefault_fake.custom_fake = fakeNoteSetFnSerialDefaultBeginSerial;
+}
+
+// Call after resetFakes(). Captures NoteSetFnSerial clears (serial nullptr path).
+void useFakeNoteCBeginSerialBusClears(void)
+{
+    fake_note_c_begin_serial_bus.reset = reinterpret_cast<serialResetFn>(0x1);
+    fake_note_c_begin_serial_bus.transmit = reinterpret_cast<serialTransmitFn>(0x1);
+    fake_note_c_begin_serial_bus.available = reinterpret_cast<serialAvailableFn>(0x1);
+    fake_note_c_begin_serial_bus.receive = reinterpret_cast<serialReceiveFn>(0x1);
+    NoteSetFnSerial_fake.custom_fake = fakeNoteSetFnSerialBeginSerial;
+}
+
+// Call after resetFakes() (and typically after begin). Captures noteDelay /
+// noteMillis so installed platform hooks can be shown to forward.
+void useFakeNoteTimeBeginSerial(void)
+{
+    fake_note_c_begin_serial_effects.last_delay_ms = 0;
+    fake_note_c_begin_serial_effects.millis_return = 0;
+    noteDelay_fake.custom_fake = fakeNoteDelayBeginSerial;
+    noteMillis_fake.custom_fake = fakeNoteMillisBeginSerial;
+}
+
+// Call after resetFakes() (and typically after begin). Captures NoteSerial_* so
+// installed noteSerial* hooks can be shown to forward.
+void useFakeNoteSerialBeginSerial(void)
+{
+    fake_note_c_begin_serial_effects.reset_return = false;
+    fake_note_c_begin_serial_effects.reset_called = false;
+    fake_note_c_begin_serial_effects.last_tx_len = 0;
+    fake_note_c_begin_serial_effects.last_tx_flush = false;
+    fake_note_c_begin_serial_effects.tx_return = 0;
+    fake_note_c_begin_serial_effects.available_return = false;
+    fake_note_c_begin_serial_effects.available_called = false;
+    fake_note_c_begin_serial_effects.receive_return = '\0';
+    NoteSerial_reset_fake.custom_fake = fakeNoteSerialResetBeginSerial;
+    NoteSerial_transmit_fake.custom_fake = fakeNoteSerialTransmitBeginSerial;
+    NoteSerial_available_fake.custom_fake = fakeNoteSerialAvailableBeginSerial;
+    NoteSerial_receive_fake.custom_fake = fakeNoteSerialReceiveBeginSerial;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -494,6 +692,302 @@ TEST_CASE("test_notecard_begin_i2c_default_parameter_for_i2cAddress_is_passed_to
   ///////////
 
   CHECK(NOTE_I2C_ADDR_DEFAULT == NoteSetFnI2CDefault_fake.arg0_val);
+}
+
+
+// X5 begin-serial outcomes: user-agent, platform malloc/free/delay/millis, and
+// serial reset/transmit/available/receive from begin(NoteSerial*).
+// Tags: [Notecard][begin-serial].
+TEST_CASE("test_notecard_begin_serial_sets_user_agent_string_to_note_arduino_when_serial_is_set", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialUserAgent();
+  static const char * const EXPECTED = "note-arduino " NOTE_ARDUINO_VERSION;
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+
+  // Action
+  notecard.begin(&fakeSerial);
+
+  // Assert
+  CHECK(0 == strcmp(EXPECTED, fake_note_c_begin_serial_ua.text));
+}
+
+TEST_CASE("test_notecard_begin_serial_sets_user_agent_string_to_note_arduino_when_serial_is_null", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialUserAgent();
+  static const char * const EXPECTED = "note-arduino " NOTE_ARDUINO_VERSION;
+  Notecard notecard;
+
+  // Action
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+
+  // Assert
+  CHECK(0 == strcmp(EXPECTED, fake_note_c_begin_serial_ua.text));
+}
+
+TEST_CASE("test_notecard_begin_serial_installs_a_malloc_hook_when_serial_is_set", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialPlatformDefaults();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+
+  // Action
+  notecard.begin(&fakeSerial);
+
+  // Assert
+  REQUIRE(nullptr != fake_note_c_begin_serial_platform.malloc_hook);
+  void * p = fake_note_c_begin_serial_platform.malloc_hook(8);
+  CHECK(nullptr != p);
+  free(p);
+}
+
+TEST_CASE("test_notecard_begin_serial_leaves_no_malloc_hook_when_serial_is_null", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialPlatformClears();
+  Notecard notecard;
+
+  // Action
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_serial_platform.malloc_hook);
+}
+
+TEST_CASE("test_notecard_begin_serial_installs_a_free_hook_when_serial_is_set", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialPlatformDefaults();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  void * p = malloc(8);
+
+  // Action
+  notecard.begin(&fakeSerial);
+
+  // Assert
+  REQUIRE(nullptr != fake_note_c_begin_serial_platform.free_hook);
+  fake_note_c_begin_serial_platform.free_hook(p);
+}
+
+TEST_CASE("test_notecard_begin_serial_leaves_no_free_hook_when_serial_is_null", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialPlatformClears();
+  Notecard notecard;
+
+  // Action
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_serial_platform.free_hook);
+}
+
+TEST_CASE("test_notecard_begin_serial_installs_a_delay_hook_that_forwards_to_note_delay_when_serial_is_set", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialPlatformDefaults();
+  useFakeNoteTimeBeginSerial();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  const uint32_t MS = 42;
+
+  // Action
+  notecard.begin(&fakeSerial);
+
+  // Assert
+  REQUIRE(nullptr != fake_note_c_begin_serial_platform.delay_hook);
+  fake_note_c_begin_serial_platform.delay_hook(MS);
+  CHECK(MS == fake_note_c_begin_serial_effects.last_delay_ms);
+}
+
+TEST_CASE("test_notecard_begin_serial_leaves_no_delay_hook_when_serial_is_null", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialPlatformClears();
+  Notecard notecard;
+
+  // Action
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_serial_platform.delay_hook);
+}
+
+TEST_CASE("test_notecard_begin_serial_installs_a_millis_hook_that_forwards_to_note_millis_when_serial_is_set", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialPlatformDefaults();
+  useFakeNoteTimeBeginSerial();
+  fake_note_c_begin_serial_effects.millis_return = 1234;
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+
+  // Action
+  notecard.begin(&fakeSerial);
+
+  // Assert
+  REQUIRE(nullptr != fake_note_c_begin_serial_platform.millis_hook);
+  CHECK(1234 == fake_note_c_begin_serial_platform.millis_hook());
+}
+
+TEST_CASE("test_notecard_begin_serial_leaves_no_millis_hook_when_serial_is_null", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialPlatformClears();
+  Notecard notecard;
+
+  // Action
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_serial_platform.millis_hook);
+}
+
+TEST_CASE("test_notecard_begin_serial_installs_a_reset_hook_that_forwards_to_the_serial_interface_when_serial_is_set", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialBusDefaults();
+  useFakeNoteSerialBeginSerial();
+  fake_note_c_begin_serial_effects.reset_return = true;
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+
+  // Action
+  notecard.begin(&fakeSerial);
+
+  // Assert
+  REQUIRE(nullptr != fake_note_c_begin_serial_bus.reset);
+  CHECK(true == fake_note_c_begin_serial_bus.reset());
+  CHECK(true == fake_note_c_begin_serial_effects.reset_called);
+}
+
+TEST_CASE("test_notecard_begin_serial_leaves_no_reset_hook_when_serial_is_null", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialBusClears();
+  Notecard notecard;
+
+  // Action
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_serial_bus.reset);
+}
+
+TEST_CASE("test_notecard_begin_serial_installs_a_transmit_hook_that_forwards_to_the_serial_interface_when_serial_is_set", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialBusDefaults();
+  useFakeNoteSerialBeginSerial();
+  fake_note_c_begin_serial_effects.tx_return = 3;
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  uint8_t buf[3] = {1, 2, 3};
+
+  // Action
+  notecard.begin(&fakeSerial);
+
+  // Assert
+  REQUIRE(nullptr != fake_note_c_begin_serial_bus.transmit);
+  fake_note_c_begin_serial_bus.transmit(buf, 3, true);
+  CHECK(3 == fake_note_c_begin_serial_effects.last_tx_len);
+  CHECK(true == fake_note_c_begin_serial_effects.last_tx_flush);
+}
+
+TEST_CASE("test_notecard_begin_serial_leaves_no_transmit_hook_when_serial_is_null", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialBusClears();
+  Notecard notecard;
+
+  // Action
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_serial_bus.transmit);
+}
+
+TEST_CASE("test_notecard_begin_serial_installs_an_available_hook_that_forwards_to_the_serial_interface_when_serial_is_set", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialBusDefaults();
+  useFakeNoteSerialBeginSerial();
+  fake_note_c_begin_serial_effects.available_return = true;
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+
+  // Action
+  notecard.begin(&fakeSerial);
+
+  // Assert
+  REQUIRE(nullptr != fake_note_c_begin_serial_bus.available);
+  CHECK(true == fake_note_c_begin_serial_bus.available());
+  CHECK(true == fake_note_c_begin_serial_effects.available_called);
+}
+
+TEST_CASE("test_notecard_begin_serial_leaves_no_available_hook_when_serial_is_null", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialBusClears();
+  Notecard notecard;
+
+  // Action
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_serial_bus.available);
+}
+
+TEST_CASE("test_notecard_begin_serial_installs_a_receive_hook_that_forwards_to_the_serial_interface_when_serial_is_set", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialBusDefaults();
+  useFakeNoteSerialBeginSerial();
+  fake_note_c_begin_serial_effects.receive_return = 'Z';
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+
+  // Action
+  notecard.begin(&fakeSerial);
+
+  // Assert
+  REQUIRE(nullptr != fake_note_c_begin_serial_bus.receive);
+  CHECK('Z' == fake_note_c_begin_serial_bus.receive());
+}
+
+TEST_CASE("test_notecard_begin_serial_leaves_no_receive_hook_when_serial_is_null", "[Notecard][begin-serial]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginSerialBusClears();
+  Notecard notecard;
+
+  // Action
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_serial_bus.receive);
 }
 
 TEST_CASE("test_notecard_begin_serial_sets_user_agent_to_note_arduino", "[Notecard]")
