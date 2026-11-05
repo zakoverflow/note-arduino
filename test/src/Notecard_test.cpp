@@ -22,6 +22,67 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+
+namespace {
+
+// Stateful fake of the note-c transaction-hook registry (X5 transaction-pins).
+// NoteSetFnTransaction's custom_fake records the installed start/stop hooks.
+// NoteTxn_start / NoteTxn_stop custom_fakes record effects when the Notecard
+// thunks (noteTransactionStart / noteTransactionStop) forward to NoteTxn.
+struct FakeNoteCTransactionHooks {
+    txnStartFn start;
+    txnStopFn stop;
+};
+FakeNoteCTransactionHooks fake_note_c_txn_hooks;
+
+struct FakeTxnEffects {
+    uint32_t last_timeout_ms;
+    bool start_return;
+    int start_calls;
+    int stop_calls;
+};
+FakeTxnEffects fake_txn_effects;
+
+void fakeNoteSetFnTransaction(txnStartFn start, txnStopFn stop)
+{
+    fake_note_c_txn_hooks.start = start;
+    fake_note_c_txn_hooks.stop = stop;
+}
+
+bool fakeTxnStart(uint32_t timeout_ms)
+{
+    ++fake_txn_effects.start_calls;
+    fake_txn_effects.last_timeout_ms = timeout_ms;
+    return fake_txn_effects.start_return;
+}
+
+void fakeTxnStop(void)
+{
+    ++fake_txn_effects.stop_calls;
+}
+
+// Call after resetFakes(). Captures the current note-c transaction hooks.
+void useFakeNoteCTransactionHooks(void)
+{
+    fake_note_c_txn_hooks.start = nullptr;
+    fake_note_c_txn_hooks.stop = nullptr;
+    NoteSetFnTransaction_fake.custom_fake = fakeNoteSetFnTransaction;
+}
+
+// Call after resetFakes() (and typically after useFakeNoteCTransactionHooks).
+// Captures NoteTxn_start / NoteTxn_stop effects through the interface fake.
+void useFakeTxnEffects(void)
+{
+    fake_txn_effects.last_timeout_ms = 0;
+    fake_txn_effects.start_return = false;
+    fake_txn_effects.start_calls = 0;
+    fake_txn_effects.stop_calls = 0;
+    NoteTxn_start_fake.custom_fake = fakeTxnStart;
+    NoteTxn_stop_fake.custom_fake = fakeTxnStop;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -1381,6 +1442,82 @@ TEST_CASE("test_notecard_setTransactionPins_clears_the_transaction_stop_function
   ///////////
 
   CHECK(!NoteSetFnTransaction_fake.arg1_val);
+}
+
+
+// X5 transaction-pins outcomes: installed note-c transaction hooks forward to
+// NoteTxn start/stop, or clear leaves no hooks. Tags: [Notecard][transaction-pins].
+TEST_CASE("test_notecard_setTransactionPins_installs_a_start_hook_that_forwards_to_the_txn", "[Notecard][transaction-pins]")
+{
+  resetFakes();
+  // Arrange — capture note-c txn hooks and NoteTxn_start effects
+  useFakeNoteCTransactionHooks();
+  useFakeTxnEffects();
+  fake_txn_effects.start_return = true;
+  Notecard notecard;
+  NoteTxn_Fake fakeTxn;
+  const uint32_t TIMEOUT_MS = 42;
+
+  // Action
+  notecard.setTransactionPins(&fakeTxn);
+
+  // Assert — a start hook is installed, and calling it forwards to the txn
+  REQUIRE(nullptr != fake_note_c_txn_hooks.start);
+  CHECK(true == fake_note_c_txn_hooks.start(TIMEOUT_MS));
+  CHECK(TIMEOUT_MS == fake_txn_effects.last_timeout_ms);
+  CHECK(1 == fake_txn_effects.start_calls);
+}
+
+TEST_CASE("test_notecard_setTransactionPins_installs_a_stop_hook_that_forwards_to_the_txn", "[Notecard][transaction-pins]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCTransactionHooks();
+  useFakeTxnEffects();
+  Notecard notecard;
+  NoteTxn_Fake fakeTxn;
+
+  // Action
+  notecard.setTransactionPins(&fakeTxn);
+
+  // Assert
+  REQUIRE(nullptr != fake_note_c_txn_hooks.stop);
+  fake_note_c_txn_hooks.stop();
+  CHECK(1 == fake_txn_effects.stop_calls);
+}
+
+TEST_CASE("test_notecard_setTransactionPins_with_nullptr_leaves_no_start_hook_installed", "[Notecard][transaction-pins]")
+{
+  resetFakes();
+  // Arrange — install a txn first, then clear via nullptr
+  useFakeNoteCTransactionHooks();
+  Notecard notecard;
+  NoteTxn_Fake fakeTxn;
+  notecard.setTransactionPins(&fakeTxn);
+  REQUIRE(nullptr != fake_note_c_txn_hooks.start);
+
+  // Action
+  notecard.setTransactionPins(nullptr);
+
+  // Assert
+  CHECK(nullptr == fake_note_c_txn_hooks.start);
+}
+
+TEST_CASE("test_notecard_setTransactionPins_with_nullptr_leaves_no_stop_hook_installed", "[Notecard][transaction-pins]")
+{
+  resetFakes();
+  // Arrange — install a txn first, then clear via nullptr
+  useFakeNoteCTransactionHooks();
+  Notecard notecard;
+  NoteTxn_Fake fakeTxn;
+  notecard.setTransactionPins(&fakeTxn);
+  REQUIRE(nullptr != fake_note_c_txn_hooks.stop);
+
+  // Action
+  notecard.setTransactionPins(nullptr);
+
+  // Assert
+  CHECK(nullptr == fake_note_c_txn_hooks.stop);
 }
 
 TEST_CASE("test_notecard_newRequest_does_not_modify_string_parameter_value_before_passing_to_note_c", "[Notecard]")
