@@ -177,55 +177,6 @@ TEST_CASE("test_make_note_serial_nullptr_deletes_the_singleton_so_a_later_call_c
     make_note_serial(nullptr);
 }
 
-TEST_CASE("test_make_note_serial_instantiates_noteserial_object", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    NoteSerial * noteserial = nullptr;
-    MakeNoteSerial_ArduinoParameters<HardwareSerial> arduino_parameters(Serial, 9600);
-
-    // Action
-    noteserial = make_note_serial<MakeNoteSerial_ArduinoParameters<HardwareSerial>>(arduino_parameters);
-
-    // Assert
-    CHECK(nullptr != noteserial);
-
-    // Clean-up
-    make_note_serial(nullptr);
-}
-
-TEST_CASE("test_make_note_serial_enforces_singleton_by_returning_same_noteserial_object_for_all_calls", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    MakeNoteSerial_ArduinoParameters<HardwareSerial> arduino_parameters(Serial, 9600);
-    NoteSerial * const noteserial_1 = make_note_serial<MakeNoteSerial_ArduinoParameters<HardwareSerial>>(arduino_parameters);
-
-    // Action
-    NoteSerial * const noteserial_2 = make_note_serial<MakeNoteSerial_ArduinoParameters<HardwareSerial>>(arduino_parameters);
-
-    // Assert
-    CHECK(noteserial_1 == noteserial_2);
-
-    // Clean-up
-    make_note_serial(nullptr);
-}
-
-//int test_make_note_serial_returns_nullptr_when_nullptr_is_passed_as_parameter()
-TEST_CASE("test_make_note_serial_deletes_singleton_when_nullptr_is_passed_as_parameter", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    MakeNoteSerial_ArduinoParameters<HardwareSerial> arduino_parameters(Serial, 9600);
-    NoteSerial * noteserial = make_note_serial<MakeNoteSerial_ArduinoParameters<HardwareSerial>>(arduino_parameters);
-    assert(noteserial);
-
-    // Action
-    noteserial = make_note_serial(nullptr);
-
-    // Assert
-    CHECK(nullptr == noteserial);
-}
 
 TEST_CASE("test_noteserial_arduino_constructor_invokes_hardware_serial_parameter_begin_method", "[NoteSerial_Arduino]")
 {
