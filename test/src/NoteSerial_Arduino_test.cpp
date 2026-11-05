@@ -154,37 +154,6 @@ TEST_CASE("test_noteserial_arduino_deconstructor_invokes_hardware_serial_end_met
     CHECK(HardwareSerial_end_fake.call_count);
 }
 
-TEST_CASE("test_noteserial_arduino_available_invokes_hardware_serial_available", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-    RESET_FAKE(HardwareSerial_available);
-
-    // Action
-    noteserial.available();
-
-    // Assert
-    CHECK(HardwareSerial_available_fake.call_count);
-}
-
-TEST_CASE("test_noteserial_arduino_available_does_not_modify_hardware_serial_available_result_value_before_returning_to_caller", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-    const size_t EXPECTED_RESULT = 79;
-
-    RESET_FAKE(HardwareSerial_available);
-    HardwareSerial_available_fake.return_val = EXPECTED_RESULT;
-
-    // Action
-    const size_t ACTUAL_RESULT = noteserial.available();
-
-    // Assert
-    CHECK(ACTUAL_RESULT == EXPECTED_RESULT);
-}
-
 TEST_CASE("test_noteserial_arduino_available_returns_the_number_of_bytes_the_serial_port_has_pending", "[NoteSerial_Arduino][available]")
 {
   resetFakes();
