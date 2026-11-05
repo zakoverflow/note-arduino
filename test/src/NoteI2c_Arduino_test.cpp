@@ -1,10 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "arduino_fakes.hpp"
 #include "NoteI2c_Arduino.hpp"
+#include "fake_clock.hpp"
 
 #include <cassert>
 #include <cstring>
+#include <string>
 
 
 // Called first in every TEST_CASE: RESET_FAKE on every FFF fake, then
@@ -12,6 +15,18 @@
 static void resetFakes(void)
 {
   resetArduinoFakes();
+}
+
+// Decision Q-D5 option A / Q-D8a: a message "prefix" is the text before the
+// first colon. The words after the colon are not locked. The {io}{i2c} tags stay.
+static void checkErrorPrefixAndTags(const char * actual, const char * expected_prefix)
+{
+  REQUIRE(nullptr != actual);
+  const std::string err(actual);
+  const size_t colon = err.find(':');
+  REQUIRE(std::string::npos != colon);
+  CHECK(expected_prefix == err.substr(0, colon));
+  CHECK_THAT(err, Catch::Matchers::EndsWith("{io}{i2c}"));
 }
 
 TEST_CASE("test_make_note_i2c_instantiates_notei2c_object", "[NoteI2c_Arduino]")
@@ -1100,4 +1115,95 @@ TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_unexpected_i2c
   // Assert
   CHECK(ACTUAL_RESULT);
   CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+}
+
+// ---------------------------------------------------------------------------
+// Q-D8: error after four failed tries; final 1000 ms wait after last failure
+// ---------------------------------------------------------------------------
+namespace {
+// Records when each endTransmission runs on the fake clock (for the final-wait
+// shouldfail test). Always returns the configured error code.
+struct FourFailTiming {
+  uint8_t error_code;
+  size_t tries;
+  uint32_t try_times_ms[8];
+} four_fail_timing;
+
+uint8_t fourFailEndTransmission(void)
+{
+  if (four_fail_timing.tries < 8) {
+    four_fail_timing.try_times_ms[four_fail_timing.tries] = fake_clock::now();
+  }
+  ++four_fail_timing.tries;
+  return four_fail_timing.error_code;
+}
+
+void startFourFailTiming(uint8_t error_code)
+{
+  memset(&four_fail_timing, 0, sizeof(four_fail_timing));
+  four_fail_timing.error_code = error_code;
+  RESET_FAKE(TwoWire_beginTransmission);
+  RESET_FAKE(TwoWire_write_byte);
+  RESET_FAKE(TwoWire_endTransmission);
+  TwoWire_endTransmission_fake.custom_fake = fourFailEndTransmission;
+  RESET_FAKE(TwoWire_requestFrom);
+  RESET_FAKE(TwoWire_read);
+  fake_clock::start_at(5000);
+}
+}  // namespace
+
+// SPEC-NOTE: Decision Q-D8a option A. After four failed tries, receive() returns
+// SPEC-NOTE: an error whose prefix (text before the first colon) is "i2c|rx" and
+// SPEC-NOTE: which ends with {io}{i2c}. Words between are not locked. Exactly four
+// SPEC-NOTE: endTransmission calls are locked because that is how "after four
+// SPEC-NOTE: failed tries" is observed (retry_count 3 => four tries).
+// SPEC-NOTE: Source: src/NoteI2c_Arduino.cpp:71-147 (retry_count / do-while) and
+// SPEC-NOTE: the case-5 ERRSTR. NoteI2c.hpp says only "a string with an error".
+TEST_CASE("test_notei2c_arduino_receive_returns_error_with_prefix_and_tags_after_four_failed_tries", "[NoteI2c_Arduino][receive]")
+{
+  resetFakes();
+  // Arrange — every try fails with timeout (code 5); what the code returns now
+  const uint8_t REQUEST_SIZE = 13;
+  uint8_t response_buffer[32];
+  uint32_t bytes_remaining = 0;
+  const char * const EXPECTED_PREFIX = "i2c|rx";
+  startFourFailTiming(5);
+  NoteI2c_Arduino notei2c(Wire);
+
+  // Action
+  const char * const ACTUAL_RESULT = notei2c.receive(
+    0x17, response_buffer, REQUEST_SIZE, &bytes_remaining);
+
+  // Assert — exactly four tries (observable); error shape matches Q-D5/Q-D8a A
+  CHECK(4 == four_fail_timing.tries);
+  CHECK(4 == TwoWire_endTransmission_fake.call_count);
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
+}
+
+// SPEC-NOTE: Decision Q-D8b option A. After the last failed try, receive() must
+// SPEC-NOTE: return without a final 1000 ms wait. Known defect vs comment: the
+// SPEC-NOTE: NoteDelayMs(1000) sits inside the do-while and also runs after the
+// SPEC-NOTE: fourth failure when no retry follows (NoteI2c_Arduino.cpp:141-147).
+// SPEC-NOTE: The comment says "between retries". Drop the final wait; TSE owns
+// SPEC-NOTE: the src change. [!shouldfail] until that fix lands.
+TEST_CASE("test_notei2c_arduino_receive_returns_without_a_final_1000_ms_wait_after_the_last_failed_try", "[NoteI2c_Arduino][receive][!shouldfail]")
+{
+  resetFakes();
+  // Arrange
+  const uint8_t REQUEST_SIZE = 13;
+  uint8_t response_buffer[32];
+  uint32_t bytes_remaining = 0;
+  startFourFailTiming(5);
+  NoteI2c_Arduino notei2c(Wire);
+
+  // Action
+  const char * const ACTUAL_RESULT = notei2c.receive(
+    0x17, response_buffer, REQUEST_SIZE, &bytes_remaining);
+
+  // Assert — after the fourth try, less than 1000 ms of fake time may pass
+  REQUIRE(nullptr != ACTUAL_RESULT);
+  REQUIRE(4 == four_fail_timing.tries);
+  const uint32_t after_last_ms = fake_clock::elapsed_since(
+    four_fail_timing.try_times_ms[3]);
+  CHECK(after_last_ms < 1000);
 }
