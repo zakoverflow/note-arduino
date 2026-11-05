@@ -20,13 +20,18 @@ static void resetFakes(void)
 
 namespace {
 
-// Stateful fake of the transmit side of a serial port.
-// It is built on the FFF fake HardwareSerial_write (custom_fake). The state is
-// a plain struct, because an FFF custom_fake is a function pointer.
+// Stateful fake of the serial port (write, begin, and end).
+// It is built on the FFF fakes HardwareSerial_write, HardwareSerial_begin, and
+// HardwareSerial_end (custom_fake). The state is a plain struct, because an FFF
+// custom_fake is a function pointer.
 // Every write call appends the bytes the port accepted to bytes_written.
+// begin records that the port is open and the baud it was begun at.
+// end records that the port is closed (is_open becomes false).
 struct FakeSerialPort {
     std::string bytes_written;       // everything the port accepted, in order
     size_t max_bytes_per_write;      // the port accepts at most this many bytes per write call
+    bool is_open;                    // true after begin has opened the port
+    unsigned int baud_rate;          // baud the port was begun at (last begin)
 };
 FakeSerialPort fake_serial_port;
 
@@ -37,12 +42,39 @@ size_t fakeSerialPortWrite(uint8_t * buffer, size_t size)
     return accepted;
 }
 
-// Install the fake port in place of the capture fake. Call after resetFakes().
+void fakeSerialPortBegin(unsigned int baud)
+{
+    fake_serial_port.is_open = true;
+    fake_serial_port.baud_rate = baud;
+}
+
+void fakeSerialPortEnd(void)
+{
+    fake_serial_port.is_open = false;
+}
+
+// Install the fake port write side. Call after resetFakes().
 void useFakeSerialPort(size_t max_bytes_per_write = SIZE_MAX)
 {
     fake_serial_port.bytes_written.clear();
     fake_serial_port.max_bytes_per_write = max_bytes_per_write;
     HardwareSerial_write_fake.custom_fake = fakeSerialPortWrite;
+}
+
+// Install the fake port begin side. Call after resetFakes().
+// Field layout matches the begin group (PR #14) so a merge keeps both helpers.
+void useFakeSerialPortBegin(void)
+{
+    fake_serial_port.is_open = false;
+    fake_serial_port.baud_rate = 0;
+    HardwareSerial_begin_fake.custom_fake = fakeSerialPortBegin;
+}
+
+// Install the fake port end side. Call after resetFakes() (and typically after
+// useFakeSerialPortBegin when the test also needs the constructor to open).
+void useFakeSerialPortEnd(void)
+{
+    HardwareSerial_end_fake.custom_fake = fakeSerialPortEnd;
 }
 
 } // namespace
@@ -125,19 +157,29 @@ TEST_CASE("test_noteserial_arduino_constructor_does_not_modify_baud_parameter_be
     CHECK(EXPECTED_BAUD_RATE == HardwareSerial_begin_fake.arg0_val);
 }
 
-TEST_CASE("test_noteserial_arduino_deconstructor_invokes_hardware_serial_end_method", "[NoteSerial_Arduino]")
+TEST_CASE("test_noteserial_arduino_destructor_closes_the_serial_port_that_the_constructor_opened", "[NoteSerial_Arduino][end]")
 {
   resetFakes();
     // Arrange
-    RESET_FAKE(HardwareSerial_end);
-    NoteSerial_Arduino<HardwareSerial> * noteserial = new NoteSerial_Arduino<HardwareSerial>(Serial, 9600);
+    // Destroying NoteSerial_Arduino must close the serial port that the
+    // constructor opened. Begin and end custom_fakes make that end state
+    // observable via is_open.
+    useFakeSerialPortBegin();
+    useFakeSerialPortEnd();
 
     // Action
+    NoteSerial_Arduino<HardwareSerial> * noteserial = new NoteSerial_Arduino<HardwareSerial>(Serial, 9600);
+
+    // Assert — constructor opened the port
+    CHECK(fake_serial_port.is_open);
+
+    // Action — destroy
     delete noteserial;
 
-    // Assert
-    CHECK(HardwareSerial_end_fake.call_count);
+    // Assert — destructor closed the port
+    CHECK_FALSE(fake_serial_port.is_open);
 }
+
 
 TEST_CASE("test_noteserial_arduino_available_invokes_hardware_serial_available", "[NoteSerial_Arduino]")
 {
