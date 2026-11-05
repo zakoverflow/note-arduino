@@ -44,6 +44,8 @@ DEFINE_FAKE_VALUE_FUNC(J *, JAddIntToObject, J *, const char *, JINTEGER);
 DEFINE_FAKE_VOID_FUNC(MockNoteDeleteResponse, J *);
 DEFINE_FAKE_VALUE_FUNC(bool, MockNoteResponseError, J *);
 DEFINE_FAKE_VOID_FUNC(NoteDebug, const char *);
+DEFINE_FAKE_VOID_FUNC(NoteDebugWithLevel, uint8_t, const char *);
+DEFINE_FAKE_VOID_FUNC(NoteDebugWithLevelLn, uint8_t, const char *);
 DEFINE_FAKE_VALUE_FUNC(bool, NoteDebugSyncStatus, int, int);
 DEFINE_FAKE_VOID_FUNC(NoteDelayMs, uint32_t);
 DEFINE_FAKE_VOID_FUNC(NoteGetFnI2C, uint32_t *, uint32_t *, i2cResetFn *, i2cTransmitFn *, i2cReceiveFn *);
@@ -122,6 +124,8 @@ void resetArduinoFakes(void)
     RESET_FAKE(MockNoteDeleteResponse);
     RESET_FAKE(MockNoteResponseError);
     RESET_FAKE(NoteDebug);
+    RESET_FAKE(NoteDebugWithLevel);
+    RESET_FAKE(NoteDebugWithLevelLn);
     RESET_FAKE(NoteDebugSyncStatus);
     RESET_FAKE(NoteDelayMs);
     RESET_FAKE(NoteGetFnI2C);
