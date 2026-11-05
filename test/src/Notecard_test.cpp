@@ -22,6 +22,106 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+namespace {
+
+// Stateful fakes for Notecard::deleteResponse / logDebug(f) / debugSyncStatus /
+// responseError (X5 deleteResponse-log-debugSync-responseError). Unique names
+// for merge with #22–#34. Captures pointers, strings, ints, and bool returns
+// passed through to note-c. (Free / format / sync-bit / err-detection semantics
+// live in note-c; not invented here. See Gaps.)
+
+struct FakeNoteCDeleteLogDebugSync {
+    J * delete_rsp;
+    char debug_message[256];
+    int debug_calls;
+    int delete_calls;
+    int poll_frequency_ms;
+    int max_level;
+    bool debug_sync_return;
+    int debug_sync_calls;
+    J * response_error_rsp;
+    unsigned char response_error_rsp_bytes[sizeof(J)];
+    bool response_error_return;
+    int response_error_calls;
+};
+FakeNoteCDeleteLogDebugSync fake_note_c_delete_log_debug_sync;
+
+void fakeNoteDeleteResponseDeleteLog(J * rsp)
+{
+    fake_note_c_delete_log_debug_sync.delete_calls += 1;
+    fake_note_c_delete_log_debug_sync.delete_rsp = rsp;
+}
+
+void fakeNoteDebugDeleteLog(const char * message)
+{
+    fake_note_c_delete_log_debug_sync.debug_calls += 1;
+    if (message) {
+        strncpy(fake_note_c_delete_log_debug_sync.debug_message, message,
+                     sizeof(fake_note_c_delete_log_debug_sync.debug_message) - 1);
+        fake_note_c_delete_log_debug_sync.debug_message[
+            sizeof(fake_note_c_delete_log_debug_sync.debug_message) - 1] = '\0';
+    } else {
+        fake_note_c_delete_log_debug_sync.debug_message[0] = '\0';
+    }
+}
+
+bool fakeNoteDebugSyncStatusDeleteLog(int pollFrequencyMs, int maxLevel)
+{
+    fake_note_c_delete_log_debug_sync.debug_sync_calls += 1;
+    fake_note_c_delete_log_debug_sync.poll_frequency_ms = pollFrequencyMs;
+    fake_note_c_delete_log_debug_sync.max_level = maxLevel;
+    return fake_note_c_delete_log_debug_sync.debug_sync_return;
+}
+
+bool fakeNoteResponseErrorDeleteLog(J * rsp)
+{
+    fake_note_c_delete_log_debug_sync.response_error_calls += 1;
+    fake_note_c_delete_log_debug_sync.response_error_rsp = rsp;
+    if (rsp) {
+        memcpy(fake_note_c_delete_log_debug_sync.response_error_rsp_bytes, rsp,
+                    sizeof(J));
+    } else {
+        memset(fake_note_c_delete_log_debug_sync.response_error_rsp_bytes, 0,
+                    sizeof(J));
+    }
+    return fake_note_c_delete_log_debug_sync.response_error_return;
+}
+
+void useFakeNoteCDeleteResponse(void)
+{
+    fake_note_c_delete_log_debug_sync.delete_rsp = nullptr;
+    fake_note_c_delete_log_debug_sync.delete_calls = 0;
+    MockNoteDeleteResponse_fake.custom_fake = fakeNoteDeleteResponseDeleteLog;
+}
+
+void useFakeNoteCLogDebug(void)
+{
+    fake_note_c_delete_log_debug_sync.debug_message[0] = '\0';
+    fake_note_c_delete_log_debug_sync.debug_calls = 0;
+    NoteDebug_fake.custom_fake = fakeNoteDebugDeleteLog;
+}
+
+void useFakeNoteCDebugSyncStatus(void)
+{
+    fake_note_c_delete_log_debug_sync.poll_frequency_ms = 0;
+    fake_note_c_delete_log_debug_sync.max_level = 0;
+    fake_note_c_delete_log_debug_sync.debug_sync_return = false;
+    fake_note_c_delete_log_debug_sync.debug_sync_calls = 0;
+    NoteDebugSyncStatus_fake.custom_fake = fakeNoteDebugSyncStatusDeleteLog;
+}
+
+void useFakeNoteCResponseError(void)
+{
+    fake_note_c_delete_log_debug_sync.response_error_rsp = nullptr;
+    memset(fake_note_c_delete_log_debug_sync.response_error_rsp_bytes, 0,
+                sizeof(J));
+    fake_note_c_delete_log_debug_sync.response_error_return = false;
+    fake_note_c_delete_log_debug_sync.response_error_calls = 0;
+    MockNoteResponseError_fake.custom_fake = fakeNoteResponseErrorDeleteLog;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -1721,193 +1821,144 @@ TEST_CASE("test_notecard_requestAndResponseWithRetry_does_not_modify_note_c_resu
   free(EXPECTED_JSON);
 }
 
-TEST_CASE("test_notecard_deleteResponse_does_not_modify_j_object_parameter_pointer_before_passing_to_note_c", "[Notecard]")
+
+// X5 deleteResponse-log-debugSync-responseError outcomes: wrappers pass
+// pointers / strings / ints to note-c and return note-c bools unchanged.
+// Tags: [Notecard][deleteResponse-log-debugSync-responseError].
+TEST_CASE("test_notecard_deleteResponse_forwards_the_json_pointer_to_note_c", "[Notecard][deleteResponse-log-debugSync-responseError]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCDeleteResponse();
   Notecard notecard;
-  J *const EXPECTED_POINTER = reinterpret_cast<J *>(0x19790917);
+  J * const RSP = reinterpret_cast<J *>(0x19790917);
 
-  RESET_FAKE(MockNoteDeleteResponse);
+  // Action
+  notecard.deleteResponse(RSP);
 
-   // Action
-  ///////////
-
-  notecard.deleteResponse(EXPECTED_POINTER);
-
-   // Assert
-  ///////////
-
-  CHECK(EXPECTED_POINTER == MockNoteDeleteResponse_fake.arg0_val);
+  // Assert
+  CHECK(1 == fake_note_c_delete_log_debug_sync.delete_calls);
+  CHECK(RSP == fake_note_c_delete_log_debug_sync.delete_rsp);
 }
 
-TEST_CASE("test_notecard_logDebug_does_not_modify_string_parameter_value_before_passing_to_note_c", "[Notecard]")
+TEST_CASE("test_notecard_logDebug_forwards_the_message_to_note_c", "[Notecard][deleteResponse-log-debugSync-responseError]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
-  const char str[] = "Hello, Test!";
+  // Arrange
+  useFakeNoteCLogDebug();
   Notecard notecard;
+  const char * const MESSAGE = "Hello, Test!";
 
-  RESET_CAPTURE_FAKE(NoteDebug);
+  // Action
+  notecard.logDebug(MESSAGE);
 
-   // Action
-  ///////////
-
-  notecard.logDebug(str);
-
-   // Assert
-  ///////////
-
-  CHECK(!strcmp(str, NoteDebug_arg0_str.c_str()));
+  // Assert
+  CHECK(1 == fake_note_c_delete_log_debug_sync.debug_calls);
+  CHECK(!strcmp(MESSAGE, fake_note_c_delete_log_debug_sync.debug_message));
 }
 
-TEST_CASE("test_notecard_logDebugf_does_not_modify_string_parameter_value_before_passing_to_note_c", "[Notecard]")
+TEST_CASE("test_notecard_logDebugf_forwards_the_formatted_message_to_note_c", "[Notecard][deleteResponse-log-debugSync-responseError]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
-  const char str[] = "Hello, Test 123!";
+  // Arrange
+  useFakeNoteCLogDebug();
   Notecard notecard;
+  const char * const EXPECTED = "Hello, Test 123!";
 
-  RESET_CAPTURE_FAKE(NoteDebug);
-
-   // Action
-  ///////////
-
+  // Action
   notecard.logDebugf("Hello, %s %d%c", "Test", 123, '!');
 
-   // Assert
-  ///////////
-
-  CHECK(!strcmp(str, NoteDebug_arg0_str.c_str()));
+  // Assert
+  CHECK(1 == fake_note_c_delete_log_debug_sync.debug_calls);
+  CHECK(!strcmp(EXPECTED, fake_note_c_delete_log_debug_sync.debug_message));
 }
 
-TEST_CASE("test_notecard_debugSyncStatus_does_not_modify_pollFrequencyMs_parameter_before_passing_to_note_c", "[Notecard]")
+TEST_CASE("test_notecard_debugSyncStatus_forwards_the_poll_frequency_to_note_c", "[Notecard][deleteResponse-log-debugSync-responseError]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCDebugSyncStatus();
   Notecard notecard;
-  const int EXPECTED_RESULT = 79;
+  const int POLL = 79;
 
-  RESET_FAKE(NoteDebugSyncStatus);
+  // Action
+  notecard.debugSyncStatus(POLL, 0);
 
-   // Action
-  ///////////
-
-  notecard.debugSyncStatus(EXPECTED_RESULT, 0);
-
-   // Assert
-  ///////////
-
-  CHECK(EXPECTED_RESULT == NoteDebugSyncStatus_fake.arg0_val);
+  // Assert
+  CHECK(POLL == fake_note_c_delete_log_debug_sync.poll_frequency_ms);
+  CHECK(1 == fake_note_c_delete_log_debug_sync.debug_sync_calls);
 }
 
-TEST_CASE("test_notecard_debugSyncStatus_does_not_modify_maxLevel_parameter_before_passing_to_note_c", "[Notecard]")
+TEST_CASE("test_notecard_debugSyncStatus_forwards_the_max_level_to_note_c", "[Notecard][deleteResponse-log-debugSync-responseError]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCDebugSyncStatus();
   Notecard notecard;
-  const int EXPECTED_RESULT = 79;
+  const int MAX_LEVEL = 79;
 
-  RESET_FAKE(NoteDebugSyncStatus);
+  // Action
+  notecard.debugSyncStatus(0, MAX_LEVEL);
 
-   // Action
-  ///////////
-
-  notecard.debugSyncStatus(0, EXPECTED_RESULT);
-
-   // Assert
-  ///////////
-
-  CHECK(EXPECTED_RESULT == NoteDebugSyncStatus_fake.arg1_val);
+  // Assert
+  CHECK(MAX_LEVEL == fake_note_c_delete_log_debug_sync.max_level);
+  CHECK(1 == fake_note_c_delete_log_debug_sync.debug_sync_calls);
 }
 
-TEST_CASE("test_notecard_debugSyncStatus_does_not_modify_note_c_result_value_before_returning_to_caller", "[Notecard]")
+TEST_CASE("test_notecard_debugSyncStatus_returns_the_note_c_bool_result", "[Notecard][deleteResponse-log-debugSync-responseError]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCDebugSyncStatus();
   Notecard notecard;
-  const bool EXPECTED_RESULT = true;
 
-  RESET_FAKE(NoteDebugSyncStatus);
-  NoteDebugSyncStatus_fake.return_val = EXPECTED_RESULT;
+  // Action / Assert: both note-c bools must pass through unchanged.
+  fake_note_c_delete_log_debug_sync.debug_sync_return = false;
+  CHECK(false == notecard.debugSyncStatus(0, 0));
+  CHECK(1 == fake_note_c_delete_log_debug_sync.debug_sync_calls);
 
-   // Action
-  ///////////
-
-  const bool ACTUAL_RESULT = notecard.debugSyncStatus(0, 0);
-
-   // Assert
-  ///////////
-
-  CHECK(EXPECTED_RESULT == ACTUAL_RESULT);
+  fake_note_c_delete_log_debug_sync.debug_sync_return = true;
+  CHECK(true == notecard.debugSyncStatus(0, 0));
+  CHECK(2 == fake_note_c_delete_log_debug_sync.debug_sync_calls);
 }
 
-TEST_CASE("test_notecard_responseError_does_not_modify_j_object_parameter_value_before_passing_to_note_c", "[Notecard]")
+TEST_CASE("test_notecard_responseError_forwards_the_json_pointer_to_note_c", "[Notecard][deleteResponse-log-debugSync-responseError]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCResponseError();
   Notecard notecard;
-  J * EXPECTED_JSON = reinterpret_cast<J *>(malloc(sizeof(J))); // JCreateObject();
-  J * json_cpy;
-  assert(nullptr != EXPECTED_JSON);
+  J rsp;
+  memset(&rsp, 0x55, sizeof(rsp));
+  J snapshot;
+  memcpy(&snapshot, &rsp, sizeof(rsp));
 
-  RESET_FAKE(MockNoteResponseError);
-  memset(EXPECTED_JSON, 0x55, sizeof(J)); //assert(nullptr != JAddStringToObject(EXPECTED_JSON,"key1", "value1"));
-  {
-    json_cpy = reinterpret_cast<J *>(malloc(sizeof(J)));
-    assert(nullptr != json_cpy);
-    memcpy(json_cpy, EXPECTED_JSON, sizeof(J));
-  } //assert(nullptr != (json_cpy = JDuplicate(EXPECTED_JSON,true)));
+  // Action
+  notecard.responseError(&rsp);
 
-   // Action
-  ///////////
-
-  notecard.responseError(json_cpy);
-
-   // Assert
-  ///////////
-
-  CHECK(!memcmp(EXPECTED_JSON, MockNoteResponseError_fake.arg0_val, sizeof(J)));
-
-  free(json_cpy);
-  free(EXPECTED_JSON);
+  // Assert: same pointer, and object bytes unchanged at the note-c boundary
+  // (restores the memcmp the D15 old test made).
+  CHECK(1 == fake_note_c_delete_log_debug_sync.response_error_calls);
+  CHECK(&rsp == fake_note_c_delete_log_debug_sync.response_error_rsp);
+  CHECK(!memcmp(&snapshot, fake_note_c_delete_log_debug_sync.response_error_rsp_bytes, sizeof(J)));
+  CHECK(!memcmp(&snapshot, &rsp, sizeof(J)));
 }
 
-TEST_CASE("test_notecard_responseError_does_not_modify_note_c_result_value_before_returning_to_caller", "[Notecard]")
+TEST_CASE("test_notecard_responseError_returns_the_note_c_bool_result", "[Notecard][deleteResponse-log-debugSync-responseError]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCResponseError();
   Notecard notecard;
-  const bool EXPECTED_RESULT = true;
 
-  RESET_FAKE(MockNoteResponseError);
-  MockNoteResponseError_fake.return_val = EXPECTED_RESULT;
+  // Action / Assert: both note-c bools must pass through unchanged.
+  fake_note_c_delete_log_debug_sync.response_error_return = false;
+  CHECK(false == notecard.responseError(nullptr));
+  CHECK(1 == fake_note_c_delete_log_debug_sync.response_error_calls);
 
-   // Action
-  ///////////
-
-  const bool ACTUAL_RESULT = notecard.responseError(nullptr);
-
-   // Assert
-  ///////////
-
-  CHECK(EXPECTED_RESULT == ACTUAL_RESULT);
+  fake_note_c_delete_log_debug_sync.response_error_return = true;
+  CHECK(true == notecard.responseError(nullptr));
+  CHECK(2 == fake_note_c_delete_log_debug_sync.response_error_calls);
 }
 
 TEST_CASE("test_notecard_newCommand_does_not_modify_string_parameter_value_before_passing_to_note_c", "[Notecard]")
