@@ -22,6 +22,96 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+namespace {
+
+// Stateful fakes for Notecard::deleteResponse / logDebug(f) / debugSyncStatus /
+// responseError (X5 deleteResponse-log-debugSync-responseError). Unique names
+// for merge with #22–#34. Captures pointers, strings, ints, and bool returns
+// passed through to note-c. (Free / format / sync-bit / err-detection semantics
+// live in note-c; not invented here. See Gaps.)
+
+struct FakeNoteCDeleteLogDebugSync {
+    J * delete_rsp;
+    char debug_message[256];
+    int debug_calls;
+    int delete_calls;
+    int poll_frequency_ms;
+    int max_level;
+    bool debug_sync_return;
+    int debug_sync_calls;
+    J * response_error_rsp;
+    bool response_error_return;
+    int response_error_calls;
+};
+FakeNoteCDeleteLogDebugSync fake_note_c_delete_log_debug_sync;
+
+void fakeNoteDeleteResponseDeleteLog(J * rsp)
+{
+    fake_note_c_delete_log_debug_sync.delete_calls += 1;
+    fake_note_c_delete_log_debug_sync.delete_rsp = rsp;
+}
+
+void fakeNoteDebugDeleteLog(const char * message)
+{
+    fake_note_c_delete_log_debug_sync.debug_calls += 1;
+    if (message) {
+        strncpy(fake_note_c_delete_log_debug_sync.debug_message, message,
+                     sizeof(fake_note_c_delete_log_debug_sync.debug_message) - 1);
+        fake_note_c_delete_log_debug_sync.debug_message[
+            sizeof(fake_note_c_delete_log_debug_sync.debug_message) - 1] = '\0';
+    } else {
+        fake_note_c_delete_log_debug_sync.debug_message[0] = '\0';
+    }
+}
+
+bool fakeNoteDebugSyncStatusDeleteLog(int pollFrequencyMs, int maxLevel)
+{
+    fake_note_c_delete_log_debug_sync.debug_sync_calls += 1;
+    fake_note_c_delete_log_debug_sync.poll_frequency_ms = pollFrequencyMs;
+    fake_note_c_delete_log_debug_sync.max_level = maxLevel;
+    return fake_note_c_delete_log_debug_sync.debug_sync_return;
+}
+
+bool fakeNoteResponseErrorDeleteLog(J * rsp)
+{
+    fake_note_c_delete_log_debug_sync.response_error_calls += 1;
+    fake_note_c_delete_log_debug_sync.response_error_rsp = rsp;
+    return fake_note_c_delete_log_debug_sync.response_error_return;
+}
+
+void useFakeNoteCDeleteResponse(void)
+{
+    fake_note_c_delete_log_debug_sync.delete_rsp = nullptr;
+    fake_note_c_delete_log_debug_sync.delete_calls = 0;
+    MockNoteDeleteResponse_fake.custom_fake = fakeNoteDeleteResponseDeleteLog;
+}
+
+void useFakeNoteCLogDebug(void)
+{
+    fake_note_c_delete_log_debug_sync.debug_message[0] = '\0';
+    fake_note_c_delete_log_debug_sync.debug_calls = 0;
+    NoteDebug_fake.custom_fake = fakeNoteDebugDeleteLog;
+}
+
+void useFakeNoteCDebugSyncStatus(void)
+{
+    fake_note_c_delete_log_debug_sync.poll_frequency_ms = 0;
+    fake_note_c_delete_log_debug_sync.max_level = 0;
+    fake_note_c_delete_log_debug_sync.debug_sync_return = false;
+    fake_note_c_delete_log_debug_sync.debug_sync_calls = 0;
+    NoteDebugSyncStatus_fake.custom_fake = fakeNoteDebugSyncStatusDeleteLog;
+}
+
+void useFakeNoteCResponseError(void)
+{
+    fake_note_c_delete_log_debug_sync.response_error_rsp = nullptr;
+    fake_note_c_delete_log_debug_sync.response_error_return = false;
+    fake_note_c_delete_log_debug_sync.response_error_calls = 0;
+    MockNoteResponseError_fake.custom_fake = fakeNoteResponseErrorDeleteLog;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -1719,6 +1809,141 @@ TEST_CASE("test_notecard_requestAndResponseWithRetry_does_not_modify_note_c_resu
 
   free(NoteRequestResponseWithRetry_fake.return_val);
   free(EXPECTED_JSON);
+}
+
+
+// X5 deleteResponse-log-debugSync-responseError outcomes: wrappers pass
+// pointers / strings / ints to note-c and return note-c bools unchanged.
+// Tags: [Notecard][deleteResponse-log-debugSync-responseError].
+TEST_CASE("test_notecard_deleteResponse_forwards_the_json_pointer_to_note_c", "[Notecard][deleteResponse-log-debugSync-responseError]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCDeleteResponse();
+  Notecard notecard;
+  J * const RSP = reinterpret_cast<J *>(0x19790917);
+
+  // Action
+  notecard.deleteResponse(RSP);
+
+  // Assert
+  CHECK(1 == fake_note_c_delete_log_debug_sync.delete_calls);
+  CHECK(RSP == fake_note_c_delete_log_debug_sync.delete_rsp);
+}
+
+TEST_CASE("test_notecard_logDebug_forwards_the_message_to_note_c", "[Notecard][deleteResponse-log-debugSync-responseError]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCLogDebug();
+  Notecard notecard;
+  const char * const MESSAGE = "Hello, Test!";
+
+  // Action
+  notecard.logDebug(MESSAGE);
+
+  // Assert
+  CHECK(1 == fake_note_c_delete_log_debug_sync.debug_calls);
+  CHECK(!strcmp(MESSAGE, fake_note_c_delete_log_debug_sync.debug_message));
+}
+
+TEST_CASE("test_notecard_logDebugf_forwards_the_formatted_message_to_note_c", "[Notecard][deleteResponse-log-debugSync-responseError]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCLogDebug();
+  Notecard notecard;
+  const char * const EXPECTED = "Hello, Test 123!";
+
+  // Action
+  notecard.logDebugf("Hello, %s %d%c", "Test", 123, '!');
+
+  // Assert
+  CHECK(1 == fake_note_c_delete_log_debug_sync.debug_calls);
+  CHECK(!strcmp(EXPECTED, fake_note_c_delete_log_debug_sync.debug_message));
+}
+
+TEST_CASE("test_notecard_debugSyncStatus_forwards_the_poll_frequency_to_note_c", "[Notecard][deleteResponse-log-debugSync-responseError]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCDebugSyncStatus();
+  Notecard notecard;
+  const int POLL = 79;
+
+  // Action
+  notecard.debugSyncStatus(POLL, 0);
+
+  // Assert
+  CHECK(POLL == fake_note_c_delete_log_debug_sync.poll_frequency_ms);
+  CHECK(1 == fake_note_c_delete_log_debug_sync.debug_sync_calls);
+}
+
+TEST_CASE("test_notecard_debugSyncStatus_forwards_the_max_level_to_note_c", "[Notecard][deleteResponse-log-debugSync-responseError]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCDebugSyncStatus();
+  Notecard notecard;
+  const int MAX_LEVEL = 79;
+
+  // Action
+  notecard.debugSyncStatus(0, MAX_LEVEL);
+
+  // Assert
+  CHECK(MAX_LEVEL == fake_note_c_delete_log_debug_sync.max_level);
+  CHECK(1 == fake_note_c_delete_log_debug_sync.debug_sync_calls);
+}
+
+TEST_CASE("test_notecard_debugSyncStatus_returns_the_note_c_bool_result", "[Notecard][deleteResponse-log-debugSync-responseError]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCDebugSyncStatus();
+  Notecard notecard;
+
+  // Action / Assert: both note-c bools must pass through unchanged.
+  fake_note_c_delete_log_debug_sync.debug_sync_return = false;
+  CHECK(false == notecard.debugSyncStatus(0, 0));
+  CHECK(1 == fake_note_c_delete_log_debug_sync.debug_sync_calls);
+
+  fake_note_c_delete_log_debug_sync.debug_sync_return = true;
+  CHECK(true == notecard.debugSyncStatus(0, 0));
+  CHECK(2 == fake_note_c_delete_log_debug_sync.debug_sync_calls);
+}
+
+TEST_CASE("test_notecard_responseError_forwards_the_json_pointer_to_note_c", "[Notecard][deleteResponse-log-debugSync-responseError]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCResponseError();
+  Notecard notecard;
+  J rsp;
+  memset(&rsp, 0x55, sizeof(rsp));
+
+  // Action
+  notecard.responseError(&rsp);
+
+  // Assert
+  CHECK(1 == fake_note_c_delete_log_debug_sync.response_error_calls);
+  CHECK(&rsp == fake_note_c_delete_log_debug_sync.response_error_rsp);
+}
+
+TEST_CASE("test_notecard_responseError_returns_the_note_c_bool_result", "[Notecard][deleteResponse-log-debugSync-responseError]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCResponseError();
+  Notecard notecard;
+
+  // Action / Assert: both note-c bools must pass through unchanged.
+  fake_note_c_delete_log_debug_sync.response_error_return = false;
+  CHECK(false == notecard.responseError(nullptr));
+  CHECK(1 == fake_note_c_delete_log_debug_sync.response_error_calls);
+
+  fake_note_c_delete_log_debug_sync.response_error_return = true;
+  CHECK(true == notecard.responseError(nullptr));
+  CHECK(2 == fake_note_c_delete_log_debug_sync.response_error_calls);
 }
 
 TEST_CASE("test_notecard_deleteResponse_does_not_modify_j_object_parameter_pointer_before_passing_to_note_c", "[Notecard]")
