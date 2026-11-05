@@ -2,6 +2,7 @@
 
 #include "arduino_fakes.hpp"
 #include "NoteSerial_Arduino.hpp"
+#include "fake_clock.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -20,13 +21,17 @@ static void resetFakes(void)
 
 namespace {
 
-// Stateful fake of the transmit side of a serial port.
-// It is built on the FFF fake HardwareSerial_write (custom_fake). The state is
-// a plain struct, because an FFF custom_fake is a function pointer.
+// Stateful fake of a serial port (transmit + constructor readiness).
+// It is built on FFF fakes HardwareSerial_write and HardwareSerial_operator_bool
+// (custom_fake). The state is a plain struct, because an FFF custom_fake is a
+// function pointer. Field layout matches the X5 FakeSerialPort shape (#14–#17)
+// on the transmit side; readiness fields serve the constructor wait tests.
 // Every write call appends the bytes the port accepted to bytes_written.
+// operator bool reports whether the port is ready for the constructor wait.
 struct FakeSerialPort {
     std::string bytes_written;       // everything the port accepted, in order
     size_t max_bytes_per_write;      // the port accepts at most this many bytes per write call
+    bool never_ready;                // when true, operator bool is always false
 };
 FakeSerialPort fake_serial_port;
 
@@ -37,12 +42,45 @@ size_t fakeSerialPortWrite(uint8_t * buffer, size_t size)
     return accepted;
 }
 
-// Install the fake port in place of the capture fake. Call after resetFakes().
+// Each readiness poll advances the fake clock by 1 ms. The constructor wait
+// loop has no delay call; advancing here makes elapsed time match the timeout
+// bound (a 3499 ms mutant yields used_ms 3499, not 3500).
+bool fakeSerialPortIsReady(void)
+{
+    if (!fake_serial_port.never_ready) {
+        return true;
+    }
+    fake_clock::advance_ms(1);
+    return false;
+}
+
+// Install the fake port write side. Call after resetFakes().
 void useFakeSerialPort(size_t max_bytes_per_write = SIZE_MAX)
 {
     fake_serial_port.bytes_written.clear();
     fake_serial_port.max_bytes_per_write = max_bytes_per_write;
     HardwareSerial_write_fake.custom_fake = fakeSerialPortWrite;
+}
+
+const uint32_t SLACK_MS = 10;
+const uint32_t PORT_WAIT_LIMIT_MS = 3500;
+
+// Install a port that never becomes ready. Call after resetFakes().
+// ms_per_read is 0: time moves only on readiness polls (see fakeSerialPortIsReady).
+void useFakeSerialPortNeverReady(uint32_t clock_start_ms)
+{
+    fake_clock::start_at(clock_start_ms, /*ms_per_read=*/0);
+    fake_serial_port.never_ready = true;
+    HardwareSerial_operator_bool_fake.custom_fake = fakeSerialPortIsReady;
+}
+
+// Construct NoteSerial_Arduino and return the fake-clock elapsed time it used.
+uint32_t millisecondsUsedByConstructor(void)
+{
+    const uint32_t start_ms = fake_clock::now();
+    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
+    (void)noteserial;
+    return fake_clock::elapsed_since(start_ms);
 }
 
 } // namespace
@@ -319,4 +357,46 @@ TEST_CASE("test_noteserial_arduino_transmit_does_not_invoke_hardware_serial_flus
 
     // Assert
     CHECK(!HardwareSerial_flush_fake.call_count);
+}
+
+// SPEC-NOTE: Decision Q-D7a option A. The lower bound of the serial constructor
+// SPEC-NOTE: wait is 3500 ms: when the port never becomes ready, the constructor
+// SPEC-NOTE: waits at least 3500 ms (elapsed on the fake clock) before giving up.
+// SPEC-NOTE: Source: src/NoteSerial_Arduino.cpp:13 (NOTE_C_SERIAL_TIMEOUT_MS 3500)
+// SPEC-NOTE: and :71-74 (wait loop). Headers and docs do not state the bound.
+// SPEC-NOTE: The tests lock elapsed time. They do not lock how the loop spins.
+// SPEC-NOTE: Early return when the port becomes ready is not locked here: it is
+// SPEC-NOTE: not stated in NoteSerial.hpp / NoteSerial_Arduino.hpp or docs.
+TEST_CASE("test_noteserial_arduino_constructor_returns_after_3500_ms_when_the_port_never_becomes_ready", "[NoteSerial_Arduino][constructor]")
+{
+  resetFakes();
+    // Arrange
+    useFakeSerialPortNeverReady(1000);
+
+    // Action
+    const uint32_t used_ms = millisecondsUsedByConstructor();
+
+    // Assert — lower bound is the requirement; slack is measurement hygiene
+    CHECK(used_ms >= PORT_WAIT_LIMIT_MS);
+    CHECK(used_ms <= (PORT_WAIT_LIMIT_MS + SLACK_MS));
+}
+
+// SPEC-NOTE: Decision Q-D7b option A. When millis() rolls over during the wait,
+// SPEC-NOTE: the wait still lasts at least 3500 ms. Known defect: startMs is a
+// SPEC-NOTE: size_t (NoteSerial_Arduino.cpp:71). On a 64-bit host the wait ends
+// SPEC-NOTE: at the wrap. On AVR (16-bit size_t) the wait is also wrong. Fix:
+// SPEC-NOTE: uint32_t startMs (as note-c does in n_serial.c:70 / n_i2c.c:53).
+// SPEC-NOTE: Owner: Tools & SDKs Engineer. [!shouldfail] until the src fix lands.
+TEST_CASE("test_noteserial_arduino_constructor_waits_at_least_3500_ms_when_the_port_never_becomes_ready_and_the_clock_wraps", "[NoteSerial_Arduino][constructor][!shouldfail]")
+{
+  resetFakes();
+    // Arrange — clock wraps 256 ms after start
+    const uint32_t CLOCK_START_MS = 0xFFFFFF00;
+    useFakeSerialPortNeverReady(CLOCK_START_MS);
+
+    // Action
+    const uint32_t used_ms = millisecondsUsedByConstructor();
+
+    // Assert — across the wrap the wait must still last at least 3500 ms
+    CHECK(used_ms >= PORT_WAIT_LIMIT_MS);
 }

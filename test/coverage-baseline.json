@@ -2,7 +2,7 @@
   "scope": "src/ except src/note-c/; exception branches not counted",
   "totals": {
     "lines_missed": 11,
-    "branches_missed": 28
+    "branches_missed": 23
   },
   "files": {
     "src/NoteI2c_Arduino.cpp": {
@@ -15,7 +15,7 @@
     },
     "src/NoteSerial_Arduino.cpp": {
       "lines_missed": 0,
-      "branches_missed": 10
+      "branches_missed": 5
     },
     "src/NoteTime_Arduino.cpp": {
       "lines_missed": 5,
