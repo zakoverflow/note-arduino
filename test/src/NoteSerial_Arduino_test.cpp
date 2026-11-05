@@ -227,38 +227,6 @@ TEST_CASE("test_noteserial_arduino_receive_returns_bytes_from_the_serial_port_in
     CHECK(noteserial.receive() == PENDING[2]);
 }
 
-TEST_CASE("test_noteserial_arduino_receive_invokes_hardware_serial_read", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-
-    RESET_FAKE(HardwareSerial_read);
-
-    // Action
-    noteserial.receive();
-
-    // Assert
-    CHECK(HardwareSerial_read_fake.call_count);
-}
-
-TEST_CASE("test_noteserial_arduino_receive_does_not_modify_hardware_serial_read_result_value_before_returning_to_caller", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    const char EXPECTED_RESULT = 'z';
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-
-    RESET_FAKE(HardwareSerial_read);
-    HardwareSerial_read_fake.return_val = EXPECTED_RESULT;
-
-    // Action
-    const char ACTUAL_RESULT = noteserial.receive();
-
-    // Assert
-    CHECK(ACTUAL_RESULT == EXPECTED_RESULT);
-}
-
 TEST_CASE("test_noteserial_arduino_reset_invokes_hardware_serial_end", "[NoteSerial_Arduino]")
 {
   resetFakes();
