@@ -20,13 +20,16 @@ static void resetFakes(void)
 
 namespace {
 
-// Stateful fake of the transmit side of a serial port.
-// It is built on the FFF fake HardwareSerial_write (custom_fake). The state is
-// a plain struct, because an FFF custom_fake is a function pointer.
+// Stateful fake of a serial port (transmit and receive sides).
+// It is built on the FFF fakes HardwareSerial_write and
+// HardwareSerial_read (custom_fake). The state is a plain struct, because an
+// FFF custom_fake is a function pointer.
 // Every write call appends the bytes the port accepted to bytes_written.
+// Every read call returns and removes the next byte from bytes_to_read.
 struct FakeSerialPort {
     std::string bytes_written;       // everything the port accepted, in order
     size_t max_bytes_per_write;      // the port accepts at most this many bytes per write call
+    std::string bytes_to_read;       // bytes waiting to be returned by read, in order
 };
 FakeSerialPort fake_serial_port;
 
@@ -37,12 +40,33 @@ size_t fakeSerialPortWrite(uint8_t * buffer, size_t size)
     return accepted;
 }
 
-// Install the fake port in place of the capture fake. Call after resetFakes().
+char fakeSerialPortRead(void)
+{
+    // When the buffer is empty, return 0. The NoteSerial receive API documents
+    // only "a single character byte" and does not define an empty-port result,
+    // so no test locks the empty case. Returning 0 lets over-read mutants fail
+    // with a CHECK rather than aborting the harness.
+    if (fake_serial_port.bytes_to_read.empty()) {
+        return 0;
+    }
+    const char next = fake_serial_port.bytes_to_read.front();
+    fake_serial_port.bytes_to_read.erase(fake_serial_port.bytes_to_read.begin());
+    return next;
+}
+
+// Install the fake port write side. Call after resetFakes().
 void useFakeSerialPort(size_t max_bytes_per_write = SIZE_MAX)
 {
     fake_serial_port.bytes_written.clear();
     fake_serial_port.max_bytes_per_write = max_bytes_per_write;
     HardwareSerial_write_fake.custom_fake = fakeSerialPortWrite;
+}
+
+// Install the fake port receive side. Call after resetFakes().
+void useFakeSerialPortReceive(std::string bytes_to_read)
+{
+    fake_serial_port.bytes_to_read = std::move(bytes_to_read);
+    HardwareSerial_read_fake.custom_fake = fakeSerialPortRead;
 }
 
 } // namespace
@@ -168,6 +192,39 @@ TEST_CASE("test_noteserial_arduino_available_does_not_modify_hardware_serial_ava
 
     // Assert
     CHECK(ACTUAL_RESULT == EXPECTED_RESULT);
+}
+
+
+TEST_CASE("test_noteserial_arduino_receive_returns_the_next_byte_the_serial_port_has", "[NoteSerial_Arduino][receive]")
+{
+  resetFakes();
+    // Arrange
+    // 0xA5 has the high bit set. receive() returns char, so this locks that the
+    // byte from the port is returned to the caller unmodified (including when
+    // char is signed and the value is negative as a signed char).
+    const char EXPECTED_RESULT = static_cast<char>(0xA5);
+    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
+    useFakeSerialPortReceive(std::string(1, EXPECTED_RESULT));
+
+    // Action
+    const char ACTUAL_RESULT = noteserial.receive();
+
+    // Assert
+    CHECK(ACTUAL_RESULT == EXPECTED_RESULT);
+}
+
+TEST_CASE("test_noteserial_arduino_receive_returns_bytes_from_the_serial_port_in_order", "[NoteSerial_Arduino][receive]")
+{
+  resetFakes();
+    // Arrange
+    const std::string PENDING = "ABC";
+    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
+    useFakeSerialPortReceive(PENDING);
+
+    // Action / Assert
+    CHECK(noteserial.receive() == PENDING[0]);
+    CHECK(noteserial.receive() == PENDING[1]);
+    CHECK(noteserial.receive() == PENDING[2]);
 }
 
 TEST_CASE("test_noteserial_arduino_receive_invokes_hardware_serial_read", "[NoteSerial_Arduino]")
