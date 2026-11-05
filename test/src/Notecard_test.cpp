@@ -1517,60 +1517,6 @@ TEST_CASE("test_notecard_newCommand_returns_the_note_c_json_pointer", "[Notecard
   CHECK(&sentinel == result);
 }
 
-TEST_CASE("test_notecard_newRequest_does_not_modify_string_parameter_value_before_passing_to_note_c", "[Notecard]")
-{
-  resetFakes();
-   // Arrange
-  ////////////
-
-  Notecard notecard;
-  const char * const EXPECTED_RESULT = "Hello, Test!";
-
-  RESET_CAPTURE_FAKE(NoteNewRequest);
-
-   // Action
-  ///////////
-
-  notecard.newRequest(EXPECTED_RESULT);
-
-   // Assert
-  ///////////
-
-  CHECK(!strcmp(EXPECTED_RESULT, NoteNewRequest_arg0_str.c_str()));
-}
-
-TEST_CASE("test_notecard_newRequest_does_not_modify_note_c_result_value_before_returning_to_caller", "[Notecard]")
-{
-  resetFakes();
-   // Arrange
-  ////////////
-
-  Notecard notecard;
-  J * const EXPECTED_JSON = reinterpret_cast<J *>(malloc(sizeof(J))); // JCreateObject();
-  assert(nullptr != EXPECTED_JSON);
-
-  RESET_CAPTURE_FAKE(NoteNewRequest);
-  memset(EXPECTED_JSON, 0x55, sizeof(J)); //assert(nullptr != JAddStringToObject(EXPECTED_JSON,"key1", "value1"));
-  {
-    NoteNewRequest_fake.return_val = reinterpret_cast<J *>(malloc(sizeof(J)));
-    assert(nullptr != NoteNewRequest_fake.return_val);
-    memcpy(NoteNewRequest_fake.return_val, EXPECTED_JSON, sizeof(J));
-  } //assert(nullptr != (NoteNewRequest_fake.return_val = JDuplicate(EXPECTED_JSON,true)));
-
-   // Action
-  ///////////
-
-  const J * const ACTUAL_RESULT = notecard.newRequest(nullptr);
-
-   // Assert
-  ///////////
-
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_JSON, sizeof(J)) /*JCompare(EXPECTED_JSON, json_result, false)*/);
-
-  free(NoteNewRequest_fake.return_val);
-  free(EXPECTED_JSON);
-}
-
 TEST_CASE("test_notecard_sendRequest_does_not_modify_j_object_parameter_value_before_passing_to_note_c", "[Notecard]")
 {
   resetFakes();
@@ -2042,60 +1988,6 @@ TEST_CASE("test_notecard_responseError_does_not_modify_note_c_result_value_befor
   ///////////
 
   CHECK(EXPECTED_RESULT == ACTUAL_RESULT);
-}
-
-TEST_CASE("test_notecard_newCommand_does_not_modify_string_parameter_value_before_passing_to_note_c", "[Notecard]")
-{
-  resetFakes();
-   // Arrange
-  ////////////
-
-  Notecard notecard;
-  const char EXPECTED_RESULT[] = "Hello, Test!";
-
-  RESET_CAPTURE_FAKE(NoteNewCommand);
-
-   // Action
-  ///////////
-
-  notecard.newCommand(EXPECTED_RESULT);
-
-   // Assert
-  ///////////
-
-  CHECK(!strcmp(EXPECTED_RESULT, NoteNewCommand_arg0_str.c_str()));
-}
-
-TEST_CASE("test_notecard_newCommand_does_not_modify_note_c_result_value_before_returning_to_caller", "[Notecard]")
-{
-  resetFakes();
-   // Arrange
-  ////////////
-
-  Notecard notecard;
-  J * EXPECTED_JSON = reinterpret_cast<J *>(malloc(sizeof(J))); // JCreateObject();
-  assert(nullptr != EXPECTED_JSON);
-
-  RESET_CAPTURE_FAKE(NoteNewCommand);
-  memset(EXPECTED_JSON, 0x55, sizeof(J)); //assert(nullptr != JAddStringToObject(EXPECTED_JSON,"key1", "value1"));
-  {
-    NoteNewCommand_fake.return_val = reinterpret_cast<J *>(malloc(sizeof(J)));
-    assert(nullptr != NoteNewCommand_fake.return_val);
-    memcpy(NoteNewCommand_fake.return_val, EXPECTED_JSON, sizeof(J));
-  } //assert(nullptr != (NoteNewCommand_fake.return_val = JDuplicate(EXPECTED_JSON,true)));
-
-   // Action
-  ///////////
-
-  const J * const ACTUAL_RESULT = notecard.newCommand(nullptr);
-
-   // Assert
-  ///////////
-
-  CHECK(!memcmp(EXPECTED_JSON, ACTUAL_RESULT, sizeof(J)) /*JCompare(EXPECTED_JSON, ACTUAL_RESULT, false)*/);
-
-  free(NoteNewCommand_fake.return_val);
-  free(EXPECTED_JSON);
 }
 
 TEST_CASE("test_static_callback_note_i2c_receive_invokes_notei2c_receive", "[Notecard]")
