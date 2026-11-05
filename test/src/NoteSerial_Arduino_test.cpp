@@ -180,19 +180,6 @@ TEST_CASE("test_noteserial_arduino_destructor_closes_the_serial_port_that_the_co
     CHECK_FALSE(fake_serial_port.is_open);
 }
 
-TEST_CASE("test_noteserial_arduino_deconstructor_invokes_hardware_serial_end_method", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    RESET_FAKE(HardwareSerial_end);
-    NoteSerial_Arduino<HardwareSerial> * noteserial = new NoteSerial_Arduino<HardwareSerial>(Serial, 9600);
-
-    // Action
-    delete noteserial;
-
-    // Assert
-    CHECK(HardwareSerial_end_fake.call_count);
-}
 
 TEST_CASE("test_noteserial_arduino_available_invokes_hardware_serial_available", "[NoteSerial_Arduino]")
 {
