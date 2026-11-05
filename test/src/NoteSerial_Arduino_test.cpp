@@ -20,15 +20,25 @@ static void resetFakes(void)
 
 namespace {
 
-// Stateful fake of the transmit side of a serial port.
-// It is built on the FFF fake HardwareSerial_write (custom_fake). The state is
-// a plain struct, because an FFF custom_fake is a function pointer.
+// Stateful fake of the serial port (write, begin, and end).
+// It is built on the FFF fakes HardwareSerial_write, HardwareSerial_begin, and
+// HardwareSerial_end (custom_fake). The state is a plain struct, because an FFF
+// custom_fake is a function pointer.
 // Every write call appends the bytes the port accepted to bytes_written.
+// begin records that the port is open and the baud it was begun at.
+// end records that the port is closed (is_open becomes false).
+// FakeSerialPort fields match the begin/end groups (PR #14 / #15) exactly.
 struct FakeSerialPort {
     std::string bytes_written;       // everything the port accepted, in order
     size_t max_bytes_per_write;      // the port accepts at most this many bytes per write call
+    bool is_open;                    // true after begin has opened the port
+    unsigned int baud_rate;          // baud the port was begun at (last begin)
 };
 FakeSerialPort fake_serial_port;
+
+// Companion ordered log for begin/end hooks (not a FakeSerialPort field). Appends
+// 'E' on end and 'B' on begin so tests can lock end-before-begin ordering.
+std::string fake_serial_port_lifecycle;
 
 size_t fakeSerialPortWrite(uint8_t * buffer, size_t size)
 {
@@ -37,12 +47,42 @@ size_t fakeSerialPortWrite(uint8_t * buffer, size_t size)
     return accepted;
 }
 
-// Install the fake port in place of the capture fake. Call after resetFakes().
+void fakeSerialPortBegin(unsigned int baud)
+{
+    fake_serial_port.is_open = true;
+    fake_serial_port.baud_rate = baud;
+    fake_serial_port_lifecycle.push_back('B');
+}
+
+void fakeSerialPortEnd(void)
+{
+    fake_serial_port.is_open = false;
+    fake_serial_port_lifecycle.push_back('E');
+}
+
+// Install the fake port write side. Call after resetFakes().
 void useFakeSerialPort(size_t max_bytes_per_write = SIZE_MAX)
 {
     fake_serial_port.bytes_written.clear();
     fake_serial_port.max_bytes_per_write = max_bytes_per_write;
     HardwareSerial_write_fake.custom_fake = fakeSerialPortWrite;
+}
+
+// Install the fake port begin side. Call after resetFakes().
+// Field layout matches the begin/end groups (PR #14 / #15).
+void useFakeSerialPortBegin(void)
+{
+    fake_serial_port.is_open = false;
+    fake_serial_port.baud_rate = 0;
+    fake_serial_port_lifecycle.clear();
+    HardwareSerial_begin_fake.custom_fake = fakeSerialPortBegin;
+}
+
+// Install the fake port end side. Call after resetFakes() (and typically after
+// useFakeSerialPortBegin when the test also needs the constructor to open).
+void useFakeSerialPortEnd(void)
+{
+    HardwareSerial_end_fake.custom_fake = fakeSerialPortEnd;
 }
 
 } // namespace
@@ -202,54 +242,66 @@ TEST_CASE("test_noteserial_arduino_receive_does_not_modify_hardware_serial_read_
     CHECK(ACTUAL_RESULT == EXPECTED_RESULT);
 }
 
-TEST_CASE("test_noteserial_arduino_reset_invokes_hardware_serial_end", "[NoteSerial_Arduino]")
+TEST_CASE("test_noteserial_arduino_reset_leaves_the_serial_port_open_at_9600_baud_when_that_baud_was_passed_to_the_constructor", "[NoteSerial_Arduino][reset]")
 {
   resetFakes();
     // Arrange
+    // After reset the port must be open at the baud originally passed to the
+    // constructor. 9600 is one of two distinct bauds locked by this group.
+    useFakeSerialPortBegin();
+    useFakeSerialPortEnd();
     NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-    RESET_FAKE(HardwareSerial_end);
 
     // Action
     noteserial.reset();
 
     // Assert
-    CHECK(HardwareSerial_end_fake.call_count);
+    CHECK(fake_serial_port.is_open);
+    CHECK(9600u == fake_serial_port.baud_rate);
 }
 
-TEST_CASE("test_noteserial_arduino_reset_invokes_hardware_serial_begin", "[NoteSerial_Arduino]")
+TEST_CASE("test_noteserial_arduino_reset_leaves_the_serial_port_open_at_115200_baud_when_that_baud_was_passed_to_the_constructor", "[NoteSerial_Arduino][reset]")
 {
   resetFakes();
     // Arrange
+    // A second distinct baud locks that reset re-begins at the constructor
+    // baud, not a constant (a constant-9600 mutant passes the 9600 test).
+    useFakeSerialPortBegin();
+    useFakeSerialPortEnd();
+    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 115200);
+
+    // Action
+    noteserial.reset();
+
+    // Assert
+    CHECK(fake_serial_port.is_open);
+    CHECK(115200u == fake_serial_port.baud_rate);
+}
+
+TEST_CASE("test_noteserial_arduino_reset_closes_the_serial_port_before_reopening_it", "[NoteSerial_Arduino][reset]")
+{
+  resetFakes();
+    // Arrange
+    // Reset must end then begin. The companion lifecycle log records 'E' on
+    // end and 'B' on begin; clearing it after construct isolates the reset.
+    useFakeSerialPortBegin();
+    useFakeSerialPortEnd();
     NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-    RESET_FAKE(HardwareSerial_begin);
+    fake_serial_port_lifecycle.clear();
 
     // Action
     noteserial.reset();
 
     // Assert
-    CHECK(HardwareSerial_begin_fake.call_count);
+    CHECK("EB" == fake_serial_port_lifecycle);
 }
 
-TEST_CASE("test_noteserial_arduino_reset_invokes_hardware_serial_begin_with_the_baud_parameter_that_was_originally_supplied_to_the_constructor", "[NoteSerial_Arduino]")
+TEST_CASE("test_noteserial_arduino_reset_returns_true", "[NoteSerial_Arduino][reset]")
 {
   resetFakes();
     // Arrange
-    const size_t EXPECTED_BAUD_RATE = 9600;
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, EXPECTED_BAUD_RATE);
-
-    RESET_FAKE(HardwareSerial_begin);
-
-    // Action
-    noteserial.reset();
-
-    // Assert
-    CHECK(EXPECTED_BAUD_RATE == HardwareSerial_begin_fake.arg0_val);
-}
-
-TEST_CASE("test_noteserial_arduino_reset_always_returns_true", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
+    useFakeSerialPortBegin();
+    useFakeSerialPortEnd();
     NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
 
     // Action
@@ -258,6 +310,7 @@ TEST_CASE("test_noteserial_arduino_reset_always_returns_true", "[NoteSerial_Ardu
     // Assert
     CHECK(ACTUAL_RESULT);
 }
+
 
 TEST_CASE("test_noteserial_arduino_transmit_returns_the_number_of_bytes_the_serial_port_accepted_when_the_port_accepts_fewer_than_requested", "[NoteSerial_Arduino][transmit]")
 {
