@@ -8,6 +8,7 @@ static int fake_sentinel;
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <iostream>
 
 
@@ -21,6 +22,52 @@ static void resetFakes(void)
   resetArduinoFakes();
   resetNoteInterfaceFakes();
 }
+
+namespace {
+
+// Stateful fake of the note-c debug-output hook registry (X5 debug-stream).
+// NoteSetFnDebugOutput's custom_fake records the installed debugOutputFn.
+// NoteLog_print's custom_fake records text written through that hook when the
+// Notecard thunk (noteLogPrint) forwards to the NoteLog stream.
+struct FakeNoteCDebugHook {
+    debugOutputFn installed;
+};
+FakeNoteCDebugHook fake_note_c_debug_hook;
+
+struct FakeDebugStream {
+    std::string written;
+};
+FakeDebugStream fake_debug_stream;
+
+void fakeNoteSetFnDebugOutput(debugOutputFn fn)
+{
+    fake_note_c_debug_hook.installed = fn;
+}
+
+size_t fakeDebugStreamPrint(const char * message)
+{
+    if (message) {
+        fake_debug_stream.written += message;
+    }
+    return message ? std::strlen(message) : 0;
+}
+
+// Call after resetFakes(). Captures the current note-c debug hook.
+void useFakeNoteCDebugHook(void)
+{
+    fake_note_c_debug_hook.installed = nullptr;
+    NoteSetFnDebugOutput_fake.custom_fake = fakeNoteSetFnDebugOutput;
+}
+
+// Call after resetFakes() (and typically after useFakeNoteCDebugHook). Captures
+// text written to the NoteLog stream via NoteLog_print.
+void useFakeDebugStream(void)
+{
+    fake_debug_stream.written.clear();
+    NoteLog_print_fake.custom_fake = fakeDebugStreamPrint;
+}
+
+}  // namespace
 
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
@@ -1065,68 +1112,59 @@ TEST_CASE("test_notecard_end_invokes_make_note_serial_nullptr_method_to_free_ass
   CHECK(nullptr == make_note_serial_with_fake.arg0_val);
 }
 
-TEST_CASE("test_notecard_setDebugOutputStream_shares_a_debug_log_function_pointer", "[Notecard]")
+// X5 debug-stream outcomes: installed note-c debug hook end-state (and that a
+// set hook forwards text to the NoteLog stream). Tags: [Notecard][debug-stream].
+TEST_CASE("test_notecard_setDebugOutputStream_installs_a_debug_hook_that_writes_to_the_stream", "[Notecard][debug-stream]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange — capture the note-c debug hook and the NoteLog stream
+  useFakeNoteCDebugHook();
+  useFakeDebugStream();
   Notecard notecard;
   NoteLog_Fake fakeLog;
-  RESET_FAKE(NoteSetFnDebugOutput);
+  const char * const MESSAGE = "debug-stream outcome";
 
-   // Action
-  ///////////
-
+  // Action
   notecard.setDebugOutputStream(&fakeLog);
 
-   // Assert
-  ///////////
-
-  CHECK(NoteSetFnDebugOutput_fake.arg0_val);
+  // Assert — a debug hook is installed, and calling it writes to the stream
+  REQUIRE(nullptr != fake_note_c_debug_hook.installed);
+  (void)fake_note_c_debug_hook.installed(MESSAGE);
+  CHECK(MESSAGE == fake_debug_stream.written);
 }
 
-TEST_CASE("test_notecard_setDebugOutputStream_clears_the_debug_log_function_pointer_when_nullptr_is_provided", "[Notecard]")
+TEST_CASE("test_notecard_setDebugOutputStream_with_nullptr_leaves_no_debug_hook_installed", "[Notecard][debug-stream]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange — install a stream first, then clear via nullptr
+  useFakeNoteCDebugHook();
   Notecard notecard;
-  RESET_FAKE(NoteSetFnDebugOutput);
-  NoteSetFnDebugOutput_fake.arg0_val = reinterpret_cast<debugOutputFn>(&fake_sentinel);
+  NoteLog_Fake fakeLog;
+  notecard.setDebugOutputStream(&fakeLog);
+  REQUIRE(nullptr != fake_note_c_debug_hook.installed);
 
-   // Action
-  ///////////
-
+  // Action
   notecard.setDebugOutputStream(nullptr);
 
-   // Assert
-  ///////////
-
-  CHECK(!NoteSetFnDebugOutput_fake.arg0_val);
+  // Assert
+  CHECK(nullptr == fake_note_c_debug_hook.installed);
 }
 
-TEST_CASE("test_notecard_clearDebugOutputStream_clears_the_debug_log_function_pointer", "[Notecard]")
+TEST_CASE("test_notecard_clearDebugOutputStream_leaves_no_debug_hook_installed", "[Notecard][debug-stream]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange — install a stream first, then clearDebugOutputStream
+  useFakeNoteCDebugHook();
   Notecard notecard;
+  NoteLog_Fake fakeLog;
+  notecard.setDebugOutputStream(&fakeLog);
+  REQUIRE(nullptr != fake_note_c_debug_hook.installed);
 
-  RESET_FAKE(NoteSetFnDebugOutput);
-  NoteSetFnDebugOutput_fake.arg0_val = reinterpret_cast<debugOutputFn>(&fake_sentinel);
-
-   // Action
-  ///////////
-
+  // Action
   notecard.clearDebugOutputStream();
 
-   // Assert
-  ///////////
-
-  CHECK(!NoteSetFnDebugOutput_fake.arg0_val);
+  // Assert
+  CHECK(nullptr == fake_note_c_debug_hook.installed);
 }
 
 TEST_CASE("test_notecard_setFn_shares_a_memory_allocation_function_pointer", "[Notecard]")
