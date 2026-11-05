@@ -22,6 +22,70 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+
+namespace {
+
+// Stateful fakes for Notecard::newRequest / newCommand (X5 newRequest-newCommand).
+// Unique names for merge with #22–#31. Captures the request string and the
+// J* returned by NoteNewRequest / NoteNewCommand so pass-through outcomes
+// are observable. (Full JSON req/cmd shape needs real note-c; see Gaps.)
+
+struct FakeNoteCNewRequestCommand {
+    char request[96];
+    J * return_json;
+    int new_request_calls;
+    int new_command_calls;
+};
+FakeNoteCNewRequestCommand fake_note_c_new_request_command;
+
+J * fakeNoteNewRequestNewRequestCommand(const char * request)
+{
+    fake_note_c_new_request_command.new_request_calls += 1;
+    if (request) {
+        strncpy(fake_note_c_new_request_command.request, request,
+                     sizeof(fake_note_c_new_request_command.request) - 1);
+        fake_note_c_new_request_command.request[sizeof(fake_note_c_new_request_command.request) - 1] = '\0';
+    } else {
+        fake_note_c_new_request_command.request[0] = '\0';
+    }
+    return fake_note_c_new_request_command.return_json;
+}
+
+J * fakeNoteNewCommandNewRequestCommand(const char * request)
+{
+    fake_note_c_new_request_command.new_command_calls += 1;
+    if (request) {
+        strncpy(fake_note_c_new_request_command.request, request,
+                     sizeof(fake_note_c_new_request_command.request) - 1);
+        fake_note_c_new_request_command.request[sizeof(fake_note_c_new_request_command.request) - 1] = '\0';
+    } else {
+        fake_note_c_new_request_command.request[0] = '\0';
+    }
+    return fake_note_c_new_request_command.return_json;
+}
+
+// Call after resetFakes(). Captures NoteNewRequest args and return.
+void useFakeNoteCNewRequest(void)
+{
+    fake_note_c_new_request_command.request[0] = '\0';
+    fake_note_c_new_request_command.return_json = nullptr;
+    fake_note_c_new_request_command.new_request_calls = 0;
+    fake_note_c_new_request_command.new_command_calls = 0;
+    NoteNewRequest_fake.custom_fake = fakeNoteNewRequestNewRequestCommand;
+}
+
+// Call after resetFakes(). Captures NoteNewCommand args and return.
+void useFakeNoteCNewCommand(void)
+{
+    fake_note_c_new_request_command.request[0] = '\0';
+    fake_note_c_new_request_command.return_json = nullptr;
+    fake_note_c_new_request_command.new_request_calls = 0;
+    fake_note_c_new_request_command.new_command_calls = 0;
+    NoteNewCommand_fake.custom_fake = fakeNoteNewCommandNewRequestCommand;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -1383,58 +1447,78 @@ TEST_CASE("test_notecard_setTransactionPins_clears_the_transaction_stop_function
   CHECK(!NoteSetFnTransaction_fake.arg1_val);
 }
 
-TEST_CASE("test_notecard_newRequest_does_not_modify_string_parameter_value_before_passing_to_note_c", "[Notecard]")
+
+// X5 newRequest-newCommand outcomes: Notecard::newRequest / newCommand pass
+// the request string to note-c and return the note-c J* unchanged.
+// Tags: [Notecard][newRequest-newCommand].
+TEST_CASE("test_notecard_newRequest_forwards_the_request_string_to_note_c", "[Notecard][newRequest-newCommand]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCNewRequest();
   Notecard notecard;
-  const char * const EXPECTED_RESULT = "Hello, Test!";
+  const char * const REQUEST = "note.add";
 
-  RESET_CAPTURE_FAKE(NoteNewRequest);
+  // Action
+  notecard.newRequest(REQUEST);
 
-   // Action
-  ///////////
-
-  notecard.newRequest(EXPECTED_RESULT);
-
-   // Assert
-  ///////////
-
-  CHECK(!strcmp(EXPECTED_RESULT, NoteNewRequest_arg0_str.c_str()));
+  // Assert
+  CHECK(1 == fake_note_c_new_request_command.new_request_calls);
+  CHECK(0 == strcmp(REQUEST, fake_note_c_new_request_command.request));
 }
 
-TEST_CASE("test_notecard_newRequest_does_not_modify_note_c_result_value_before_returning_to_caller", "[Notecard]")
+TEST_CASE("test_notecard_newRequest_returns_the_note_c_json_pointer", "[Notecard][newRequest-newCommand]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCNewRequest();
   Notecard notecard;
-  J * const EXPECTED_JSON = reinterpret_cast<J *>(malloc(sizeof(J))); // JCreateObject();
-  assert(nullptr != EXPECTED_JSON);
+  J sentinel;
+  memset(&sentinel, 0x55, sizeof(sentinel));
 
-  RESET_CAPTURE_FAKE(NoteNewRequest);
-  memset(EXPECTED_JSON, 0x55, sizeof(J)); //assert(nullptr != JAddStringToObject(EXPECTED_JSON,"key1", "value1"));
-  {
-    NoteNewRequest_fake.return_val = reinterpret_cast<J *>(malloc(sizeof(J)));
-    assert(nullptr != NoteNewRequest_fake.return_val);
-    memcpy(NoteNewRequest_fake.return_val, EXPECTED_JSON, sizeof(J));
-  } //assert(nullptr != (NoteNewRequest_fake.return_val = JDuplicate(EXPECTED_JSON,true)));
+  // Action / Assert: non-null and nullptr note-c returns must pass through.
+  fake_note_c_new_request_command.return_json = &sentinel;
+  CHECK(&sentinel == notecard.newRequest("note.add"));
+  CHECK(1 == fake_note_c_new_request_command.new_request_calls);
 
-   // Action
-  ///////////
+  fake_note_c_new_request_command.return_json = nullptr;
+  CHECK(nullptr == notecard.newRequest("note.add"));
+  CHECK(2 == fake_note_c_new_request_command.new_request_calls);
+}
 
-  const J * const ACTUAL_RESULT = notecard.newRequest(nullptr);
+TEST_CASE("test_notecard_newCommand_forwards_the_request_string_to_note_c", "[Notecard][newRequest-newCommand]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCNewCommand();
+  Notecard notecard;
+  const char * const REQUEST = "note.add";
 
-   // Assert
-  ///////////
+  // Action
+  notecard.newCommand(REQUEST);
 
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_JSON, sizeof(J)) /*JCompare(EXPECTED_JSON, json_result, false)*/);
+  // Assert
+  CHECK(1 == fake_note_c_new_request_command.new_command_calls);
+  CHECK(0 == strcmp(REQUEST, fake_note_c_new_request_command.request));
+}
 
-  free(NoteNewRequest_fake.return_val);
-  free(EXPECTED_JSON);
+TEST_CASE("test_notecard_newCommand_returns_the_note_c_json_pointer", "[Notecard][newRequest-newCommand]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCNewCommand();
+  Notecard notecard;
+  J sentinel;
+  memset(&sentinel, 0xA5, sizeof(sentinel));
+
+  // Action / Assert: non-null and nullptr note-c returns must pass through.
+  fake_note_c_new_request_command.return_json = &sentinel;
+  CHECK(&sentinel == notecard.newCommand("note.add"));
+  CHECK(1 == fake_note_c_new_request_command.new_command_calls);
+
+  fake_note_c_new_request_command.return_json = nullptr;
+  CHECK(nullptr == notecard.newCommand("note.add"));
+  CHECK(2 == fake_note_c_new_request_command.new_command_calls);
 }
 
 TEST_CASE("test_notecard_sendRequest_does_not_modify_j_object_parameter_value_before_passing_to_note_c", "[Notecard]")
@@ -1908,60 +1992,6 @@ TEST_CASE("test_notecard_responseError_does_not_modify_note_c_result_value_befor
   ///////////
 
   CHECK(EXPECTED_RESULT == ACTUAL_RESULT);
-}
-
-TEST_CASE("test_notecard_newCommand_does_not_modify_string_parameter_value_before_passing_to_note_c", "[Notecard]")
-{
-  resetFakes();
-   // Arrange
-  ////////////
-
-  Notecard notecard;
-  const char EXPECTED_RESULT[] = "Hello, Test!";
-
-  RESET_CAPTURE_FAKE(NoteNewCommand);
-
-   // Action
-  ///////////
-
-  notecard.newCommand(EXPECTED_RESULT);
-
-   // Assert
-  ///////////
-
-  CHECK(!strcmp(EXPECTED_RESULT, NoteNewCommand_arg0_str.c_str()));
-}
-
-TEST_CASE("test_notecard_newCommand_does_not_modify_note_c_result_value_before_returning_to_caller", "[Notecard]")
-{
-  resetFakes();
-   // Arrange
-  ////////////
-
-  Notecard notecard;
-  J * EXPECTED_JSON = reinterpret_cast<J *>(malloc(sizeof(J))); // JCreateObject();
-  assert(nullptr != EXPECTED_JSON);
-
-  RESET_CAPTURE_FAKE(NoteNewCommand);
-  memset(EXPECTED_JSON, 0x55, sizeof(J)); //assert(nullptr != JAddStringToObject(EXPECTED_JSON,"key1", "value1"));
-  {
-    NoteNewCommand_fake.return_val = reinterpret_cast<J *>(malloc(sizeof(J)));
-    assert(nullptr != NoteNewCommand_fake.return_val);
-    memcpy(NoteNewCommand_fake.return_val, EXPECTED_JSON, sizeof(J));
-  } //assert(nullptr != (NoteNewCommand_fake.return_val = JDuplicate(EXPECTED_JSON,true)));
-
-   // Action
-  ///////////
-
-  const J * const ACTUAL_RESULT = notecard.newCommand(nullptr);
-
-   // Assert
-  ///////////
-
-  CHECK(!memcmp(EXPECTED_JSON, ACTUAL_RESULT, sizeof(J)) /*JCompare(EXPECTED_JSON, ACTUAL_RESULT, false)*/);
-
-  free(NoteNewCommand_fake.return_val);
-  free(EXPECTED_JSON);
 }
 
 TEST_CASE("test_static_callback_note_i2c_receive_invokes_notei2c_receive", "[Notecard]")
