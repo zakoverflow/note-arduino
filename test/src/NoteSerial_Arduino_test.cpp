@@ -20,13 +20,16 @@ static void resetFakes(void)
 
 namespace {
 
-// Stateful fake of the transmit side of a serial port.
-// It is built on the FFF fake HardwareSerial_write (custom_fake). The state is
-// a plain struct, because an FFF custom_fake is a function pointer.
+// Stateful fake of a serial port (transmit and receive sides).
+// It is built on the FFF fakes HardwareSerial_write and
+// HardwareSerial_available (custom_fake). The state is a plain struct, because
+// an FFF custom_fake is a function pointer.
 // Every write call appends the bytes the port accepted to bytes_written.
+// available() returns bytes_pending (the number of bytes waiting to be read).
 struct FakeSerialPort {
     std::string bytes_written;       // everything the port accepted, in order
     size_t max_bytes_per_write;      // the port accepts at most this many bytes per write call
+    size_t bytes_pending;            // bytes waiting to be read on the receive side
 };
 FakeSerialPort fake_serial_port;
 
@@ -37,12 +40,24 @@ size_t fakeSerialPortWrite(uint8_t * buffer, size_t size)
     return accepted;
 }
 
-// Install the fake port in place of the capture fake. Call after resetFakes().
+unsigned int fakeSerialPortAvailable(void)
+{
+    return static_cast<unsigned int>(fake_serial_port.bytes_pending);
+}
+
+// Install the fake port write side. Call after resetFakes().
 void useFakeSerialPort(size_t max_bytes_per_write = SIZE_MAX)
 {
     fake_serial_port.bytes_written.clear();
     fake_serial_port.max_bytes_per_write = max_bytes_per_write;
     HardwareSerial_write_fake.custom_fake = fakeSerialPortWrite;
+}
+
+// Install the fake port available side. Call after resetFakes().
+void useFakeSerialPortPending(size_t bytes_pending)
+{
+    fake_serial_port.bytes_pending = bytes_pending;
+    HardwareSerial_available_fake.custom_fake = fakeSerialPortAvailable;
 }
 
 } // namespace
@@ -168,6 +183,35 @@ TEST_CASE("test_noteserial_arduino_available_does_not_modify_hardware_serial_ava
 
     // Assert
     CHECK(ACTUAL_RESULT == EXPECTED_RESULT);
+}
+
+TEST_CASE("test_noteserial_arduino_available_returns_the_number_of_bytes_the_serial_port_has_pending", "[NoteSerial_Arduino][available]")
+{
+  resetFakes();
+    // Arrange
+    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
+    const size_t EXPECTED_PENDING = 79;
+    useFakeSerialPortPending(EXPECTED_PENDING);
+
+    // Action
+    const size_t ACTUAL_RESULT = noteserial.available();
+
+    // Assert
+    CHECK(EXPECTED_PENDING == ACTUAL_RESULT);
+}
+
+TEST_CASE("test_noteserial_arduino_available_returns_0_when_none_are_pending", "[NoteSerial_Arduino][available]")
+{
+  resetFakes();
+    // Arrange
+    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
+    useFakeSerialPortPending(0);
+
+    // Action
+    const size_t ACTUAL_RESULT = noteserial.available();
+
+    // Assert
+    CHECK(0 == ACTUAL_RESULT);
 }
 
 TEST_CASE("test_noteserial_arduino_receive_invokes_hardware_serial_read", "[NoteSerial_Arduino]")
