@@ -22,6 +22,155 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+
+namespace {
+
+// Stateful fake of the note-c platform / mutex hook registries (X5 setFn-hooks).
+// NoteSetFn / NoteSetFnI2CMutex / NoteSetFnNoteMutex custom_fakes record the
+// installed hooks. Caller-supplied hooks below record observable side effects
+// so tests lock that the installed hooks forward to the caller.
+
+struct FakeNoteCPlatformHooks {
+    mallocFn malloc_hook;
+    freeFn free_hook;
+    delayMsFn delay_hook;
+    getMsFn millis_hook;
+};
+FakeNoteCPlatformHooks fake_note_c_platform_hooks;
+
+struct FakeUserPlatform {
+    size_t last_malloc_size;
+    void * malloc_return;
+    void * last_freed;
+    uint32_t last_delay_ms;
+    uint32_t millis_return;
+};
+FakeUserPlatform fake_user_platform;
+
+struct FakeNoteCMutexHooks {
+    mutexFn lock;
+    mutexFn unlock;
+};
+FakeNoteCMutexHooks fake_note_c_i2c_mutex;
+FakeNoteCMutexHooks fake_note_c_note_mutex;
+
+struct FakeUserMutex {
+    int lock_calls;
+    int unlock_calls;
+};
+FakeUserMutex fake_user_i2c_mutex;
+FakeUserMutex fake_user_note_mutex;
+
+void fakeNoteSetFn(mallocFn malloc_hook, freeFn free_hook, delayMsFn delay_hook, getMsFn millis_hook)
+{
+    fake_note_c_platform_hooks.malloc_hook = malloc_hook;
+    fake_note_c_platform_hooks.free_hook = free_hook;
+    fake_note_c_platform_hooks.delay_hook = delay_hook;
+    fake_note_c_platform_hooks.millis_hook = millis_hook;
+}
+
+void * userMalloc(size_t size)
+{
+    fake_user_platform.last_malloc_size = size;
+    return fake_user_platform.malloc_return;
+}
+
+void userFree(void * mem)
+{
+    fake_user_platform.last_freed = mem;
+}
+
+void userDelay(uint32_t ms)
+{
+    fake_user_platform.last_delay_ms = ms;
+}
+
+uint32_t userMillis(void)
+{
+    return fake_user_platform.millis_return;
+}
+
+void fakeNoteSetFnI2CMutex(mutexFn lock, mutexFn unlock)
+{
+    fake_note_c_i2c_mutex.lock = lock;
+    fake_note_c_i2c_mutex.unlock = unlock;
+}
+
+void fakeNoteSetFnNoteMutex(mutexFn lock, mutexFn unlock)
+{
+    fake_note_c_note_mutex.lock = lock;
+    fake_note_c_note_mutex.unlock = unlock;
+}
+
+void userI2cLock(void)
+{
+    ++fake_user_i2c_mutex.lock_calls;
+}
+
+void userI2cUnlock(void)
+{
+    ++fake_user_i2c_mutex.unlock_calls;
+}
+
+void userNoteLock(void)
+{
+    ++fake_user_note_mutex.lock_calls;
+}
+
+void userNoteUnlock(void)
+{
+    ++fake_user_note_mutex.unlock_calls;
+}
+
+// Call after resetFakes(). Captures NoteSetFn platform hooks.
+void useFakeNoteCPlatformHooks(void)
+{
+    fake_note_c_platform_hooks.malloc_hook = nullptr;
+    fake_note_c_platform_hooks.free_hook = nullptr;
+    fake_note_c_platform_hooks.delay_hook = nullptr;
+    fake_note_c_platform_hooks.millis_hook = nullptr;
+    NoteSetFn_fake.custom_fake = fakeNoteSetFn;
+}
+
+// Call after resetFakes(). Captures NoteSetFnI2CMutex hooks.
+void useFakeNoteCI2cMutex(void)
+{
+    fake_note_c_i2c_mutex.lock = nullptr;
+    fake_note_c_i2c_mutex.unlock = nullptr;
+    NoteSetFnI2CMutex_fake.custom_fake = fakeNoteSetFnI2CMutex;
+}
+
+// Call after resetFakes(). Captures NoteSetFnNoteMutex hooks.
+void useFakeNoteCNoteMutex(void)
+{
+    fake_note_c_note_mutex.lock = nullptr;
+    fake_note_c_note_mutex.unlock = nullptr;
+    NoteSetFnNoteMutex_fake.custom_fake = fakeNoteSetFnNoteMutex;
+}
+
+void clearFakeUserPlatform(void)
+{
+    fake_user_platform.last_malloc_size = 0;
+    fake_user_platform.malloc_return = nullptr;
+    fake_user_platform.last_freed = nullptr;
+    fake_user_platform.last_delay_ms = 0;
+    fake_user_platform.millis_return = 0;
+}
+
+void clearFakeUserI2cMutex(void)
+{
+    fake_user_i2c_mutex.lock_calls = 0;
+    fake_user_i2c_mutex.unlock_calls = 0;
+}
+
+void clearFakeUserNoteMutex(void)
+{
+    fake_user_note_mutex.lock_calls = 0;
+    fake_user_note_mutex.unlock_calls = 0;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -1129,172 +1278,149 @@ TEST_CASE("test_notecard_clearDebugOutputStream_clears_the_debug_log_function_po
   CHECK(!NoteSetFnDebugOutput_fake.arg0_val);
 }
 
-TEST_CASE("test_notecard_setFn_shares_a_memory_allocation_function_pointer", "[Notecard]")
+
+// X5 setFn-hooks outcomes: installed note-c platform / mutex hooks forward to
+// the caller-supplied functions. Tags: [Notecard][setFn-hooks].
+TEST_CASE("test_notecard_setFn_installs_a_malloc_hook_that_forwards_to_the_caller_hook", "[Notecard][setFn-hooks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
-  const mallocFn mockMallocFn = reinterpret_cast<mallocFn>(0x19790917);
-
+  // Arrange — capture NoteSetFn hooks; provide a caller malloc with a known return
+  useFakeNoteCPlatformHooks();
+  clearFakeUserPlatform();
+  static char buffer;
+  fake_user_platform.malloc_return = &buffer;
   Notecard notecard;
-  RESET_FAKE(NoteSetFn);
+  const size_t SIZE = 42;
 
-   // Action
-  ///////////
+  // Action
+  notecard.setFn(userMalloc, nullptr, nullptr, nullptr);
 
-  notecard.setFn(mockMallocFn, nullptr, nullptr, nullptr);
-
-   // Assert
-  ///////////
-
-  CHECK(NoteSetFn_fake.arg0_val);
+  // Assert — a malloc hook is installed, and calling it forwards to the caller
+  REQUIRE(nullptr != fake_note_c_platform_hooks.malloc_hook);
+  void * const got = fake_note_c_platform_hooks.malloc_hook(SIZE);
+  CHECK(SIZE == fake_user_platform.last_malloc_size);
+  CHECK(&buffer == got);
 }
 
-TEST_CASE("test_notecard_setFn_shares_a_memory_deallocation_function_pointer", "[Notecard]")
+TEST_CASE("test_notecard_setFn_installs_a_free_hook_that_forwards_to_the_caller_hook", "[Notecard][setFn-hooks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
-  const freeFn mockFreeFn = reinterpret_cast<freeFn>(0x19790917);
-
+  // Arrange
+  useFakeNoteCPlatformHooks();
+  clearFakeUserPlatform();
+  static char block;
   Notecard notecard;
-  RESET_FAKE(NoteSetFn);
 
-   // Action
-  ///////////
+  // Action
+  notecard.setFn(nullptr, userFree, nullptr, nullptr);
 
-  notecard.setFn(nullptr, mockFreeFn, nullptr, nullptr);
-
-   // Assert
-  ///////////
-
-  CHECK(NoteSetFn_fake.arg1_val);
+  // Assert
+  REQUIRE(nullptr != fake_note_c_platform_hooks.free_hook);
+  fake_note_c_platform_hooks.free_hook(&block);
+  CHECK(&block == fake_user_platform.last_freed);
 }
 
-TEST_CASE("test_notecard_setFn_shares_a_delay_function_pointer", "[Notecard]")
+TEST_CASE("test_notecard_setFn_installs_a_delay_hook_that_forwards_to_the_caller_hook", "[Notecard][setFn-hooks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
-  const delayMsFn mockDelayFn = reinterpret_cast<delayMsFn>(0x19790917);
-
+  // Arrange
+  useFakeNoteCPlatformHooks();
+  clearFakeUserPlatform();
   Notecard notecard;
-  RESET_FAKE(NoteSetFn);
+  const uint32_t MS = 17;
 
-   // Action
-  ///////////
+  // Action
+  notecard.setFn(nullptr, nullptr, userDelay, nullptr);
 
-  notecard.setFn(nullptr, nullptr, mockDelayFn, nullptr);
-
-   // Assert
-  ///////////
-
-  CHECK(NoteSetFn_fake.arg2_val);
+  // Assert
+  REQUIRE(nullptr != fake_note_c_platform_hooks.delay_hook);
+  fake_note_c_platform_hooks.delay_hook(MS);
+  CHECK(MS == fake_user_platform.last_delay_ms);
 }
 
-TEST_CASE("test_notecard_setFn_shares_a_millis_function_pointer", "[Notecard]")
+TEST_CASE("test_notecard_setFn_installs_a_millis_hook_that_forwards_to_the_caller_hook", "[Notecard][setFn-hooks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
-  const getMsFn mockMillisFn = reinterpret_cast<getMsFn>(0x19790917);
-
+  // Arrange
+  useFakeNoteCPlatformHooks();
+  clearFakeUserPlatform();
+  fake_user_platform.millis_return = 1234;
   Notecard notecard;
-  RESET_FAKE(NoteSetFn);
 
-   // Action
-  ///////////
+  // Action
+  notecard.setFn(nullptr, nullptr, nullptr, userMillis);
 
-  notecard.setFn(nullptr, nullptr, nullptr, mockMillisFn);
-
-   // Assert
-  ///////////
-
-  CHECK(NoteSetFn_fake.arg3_val);
+  // Assert
+  REQUIRE(nullptr != fake_note_c_platform_hooks.millis_hook);
+  CHECK(1234 == fake_note_c_platform_hooks.millis_hook());
 }
 
-TEST_CASE("test_notecard_setFnI2cMutex_does_not_modify_locking_mutex_func_parameter_value_before_passing_to_note_c", "[Notecard]")
+TEST_CASE("test_notecard_setFnI2cMutex_installs_a_lock_hook_that_invokes_the_caller_lock", "[Notecard][setFn-hooks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-  const mutexFn lockFn = reinterpret_cast<mutexFn>(0x19790917);
+  // Arrange
+  useFakeNoteCI2cMutex();
+  clearFakeUserI2cMutex();
   Notecard notecard;
-  RESET_FAKE(NoteSetFnI2CMutex);
 
-   // Action
-  ///////////
+  // Action
+  notecard.setFnI2cMutex(userI2cLock, nullptr);
 
-  notecard.setFnI2cMutex(lockFn,nullptr);
-
-   // Assert
-  ///////////
-
-  CHECK(lockFn == NoteSetFnI2CMutex_fake.arg0_val);
+  // Assert
+  REQUIRE(nullptr != fake_note_c_i2c_mutex.lock);
+  fake_note_c_i2c_mutex.lock();
+  CHECK(1 == fake_user_i2c_mutex.lock_calls);
 }
 
-TEST_CASE("test_notecard_setFnI2cMutex_does_not_modify_unlocking_mutex_func_parameter_value_before_passing_to_note_c", "[Notecard]")
+TEST_CASE("test_notecard_setFnI2cMutex_installs_an_unlock_hook_that_invokes_the_caller_unlock", "[Notecard][setFn-hooks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-  const mutexFn unlockFn = reinterpret_cast<mutexFn>(0x19790917);
+  // Arrange
+  useFakeNoteCI2cMutex();
+  clearFakeUserI2cMutex();
   Notecard notecard;
-  RESET_FAKE(NoteSetFnI2CMutex);
 
-   // Action
-  ///////////
+  // Action
+  notecard.setFnI2cMutex(nullptr, userI2cUnlock);
 
-  notecard.setFnI2cMutex(nullptr,unlockFn);
-
-   // Assert
-  ///////////
-
-  CHECK(unlockFn == NoteSetFnI2CMutex_fake.arg1_val);
+  // Assert
+  REQUIRE(nullptr != fake_note_c_i2c_mutex.unlock);
+  fake_note_c_i2c_mutex.unlock();
+  CHECK(1 == fake_user_i2c_mutex.unlock_calls);
 }
 
-TEST_CASE("test_notecard_setFnNoteMutex_does_not_modify_locking_mutex_func_parameter_value_before_passing_to_note_c", "[Notecard]")
+TEST_CASE("test_notecard_setFnNoteMutex_installs_a_lock_hook_that_invokes_the_caller_lock", "[Notecard][setFn-hooks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-  const mutexFn lockFn = reinterpret_cast<mutexFn>(0x19790917);
+  // Arrange
+  useFakeNoteCNoteMutex();
+  clearFakeUserNoteMutex();
   Notecard notecard;
-  RESET_FAKE(NoteSetFnNoteMutex);
 
-   // Action
-  ///////////
+  // Action
+  notecard.setFnNoteMutex(userNoteLock, nullptr);
 
-  notecard.setFnNoteMutex(lockFn,nullptr);
-
-   // Assert
-  ///////////
-
-  CHECK(lockFn == NoteSetFnNoteMutex_fake.arg0_val);
+  // Assert
+  REQUIRE(nullptr != fake_note_c_note_mutex.lock);
+  fake_note_c_note_mutex.lock();
+  CHECK(1 == fake_user_note_mutex.lock_calls);
 }
 
-TEST_CASE("test_notecard_setFnNoteMutex_does_not_modify_unlocking_mutex_func_parameter_value_before_passing_to_note_c", "[Notecard]")
+TEST_CASE("test_notecard_setFnNoteMutex_installs_an_unlock_hook_that_invokes_the_caller_unlock", "[Notecard][setFn-hooks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-  const mutexFn unlockFn = reinterpret_cast<mutexFn>(0x19790917);
+  // Arrange
+  useFakeNoteCNoteMutex();
+  clearFakeUserNoteMutex();
   Notecard notecard;
-  RESET_FAKE(NoteSetFnNoteMutex);
 
-   // Action
-  ///////////
+  // Action
+  notecard.setFnNoteMutex(nullptr, userNoteUnlock);
 
-  notecard.setFnNoteMutex(nullptr,unlockFn);
-
-   // Assert
-  ///////////
-
-  CHECK(unlockFn == NoteSetFnNoteMutex_fake.arg1_val);
+  // Assert
+  REQUIRE(nullptr != fake_note_c_note_mutex.unlock);
+  fake_note_c_note_mutex.unlock();
+  CHECK(1 == fake_user_note_mutex.unlock_calls);
 }
 
 TEST_CASE("test_notecard_setTransactionPins_shares_a_transaction_start_function_pointer", "[Notecard]")
