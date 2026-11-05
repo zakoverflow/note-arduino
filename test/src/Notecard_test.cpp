@@ -40,6 +40,7 @@ struct FakeNoteCDeleteLogDebugSync {
     bool debug_sync_return;
     int debug_sync_calls;
     J * response_error_rsp;
+    unsigned char response_error_rsp_bytes[sizeof(J)];
     bool response_error_return;
     int response_error_calls;
 };
@@ -76,6 +77,13 @@ bool fakeNoteResponseErrorDeleteLog(J * rsp)
 {
     fake_note_c_delete_log_debug_sync.response_error_calls += 1;
     fake_note_c_delete_log_debug_sync.response_error_rsp = rsp;
+    if (rsp) {
+        memcpy(fake_note_c_delete_log_debug_sync.response_error_rsp_bytes, rsp,
+                    sizeof(J));
+    } else {
+        memset(fake_note_c_delete_log_debug_sync.response_error_rsp_bytes, 0,
+                    sizeof(J));
+    }
     return fake_note_c_delete_log_debug_sync.response_error_return;
 }
 
@@ -105,6 +113,8 @@ void useFakeNoteCDebugSyncStatus(void)
 void useFakeNoteCResponseError(void)
 {
     fake_note_c_delete_log_debug_sync.response_error_rsp = nullptr;
+    memset(fake_note_c_delete_log_debug_sync.response_error_rsp_bytes, 0,
+                sizeof(J));
     fake_note_c_delete_log_debug_sync.response_error_return = false;
     fake_note_c_delete_log_debug_sync.response_error_calls = 0;
     MockNoteResponseError_fake.custom_fake = fakeNoteResponseErrorDeleteLog;
@@ -1920,13 +1930,18 @@ TEST_CASE("test_notecard_responseError_forwards_the_json_pointer_to_note_c", "[N
   Notecard notecard;
   J rsp;
   memset(&rsp, 0x55, sizeof(rsp));
+  J snapshot;
+  memcpy(&snapshot, &rsp, sizeof(rsp));
 
   // Action
   notecard.responseError(&rsp);
 
-  // Assert
+  // Assert: same pointer, and object bytes unchanged at the note-c boundary
+  // (restores the memcmp the D15 old test made).
   CHECK(1 == fake_note_c_delete_log_debug_sync.response_error_calls);
   CHECK(&rsp == fake_note_c_delete_log_debug_sync.response_error_rsp);
+  CHECK(!memcmp(&snapshot, fake_note_c_delete_log_debug_sync.response_error_rsp_bytes, sizeof(J)));
+  CHECK(!memcmp(&snapshot, &rsp, sizeof(J)));
 }
 
 TEST_CASE("test_notecard_responseError_returns_the_note_c_bool_result", "[Notecard][deleteResponse-log-debugSync-responseError]")
