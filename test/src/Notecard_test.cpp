@@ -1475,13 +1475,15 @@ TEST_CASE("test_notecard_newRequest_returns_the_note_c_json_pointer", "[Notecard
   Notecard notecard;
   J sentinel;
   memset(&sentinel, 0x55, sizeof(sentinel));
+
+  // Action / Assert: non-null and nullptr note-c returns must pass through.
   fake_note_c_new_request_command.return_json = &sentinel;
+  CHECK(&sentinel == notecard.newRequest("note.add"));
+  CHECK(1 == fake_note_c_new_request_command.new_request_calls);
 
-  // Action
-  J * result = notecard.newRequest("note.add");
-
-  // Assert
-  CHECK(&sentinel == result);
+  fake_note_c_new_request_command.return_json = nullptr;
+  CHECK(nullptr == notecard.newRequest("note.add"));
+  CHECK(2 == fake_note_c_new_request_command.new_request_calls);
 }
 
 TEST_CASE("test_notecard_newCommand_forwards_the_request_string_to_note_c", "[Notecard][newRequest-newCommand]")
@@ -1508,13 +1510,15 @@ TEST_CASE("test_notecard_newCommand_returns_the_note_c_json_pointer", "[Notecard
   Notecard notecard;
   J sentinel;
   memset(&sentinel, 0xA5, sizeof(sentinel));
+
+  // Action / Assert: non-null and nullptr note-c returns must pass through.
   fake_note_c_new_request_command.return_json = &sentinel;
+  CHECK(&sentinel == notecard.newCommand("note.add"));
+  CHECK(1 == fake_note_c_new_request_command.new_command_calls);
 
-  // Action
-  J * result = notecard.newCommand("note.add");
-
-  // Assert
-  CHECK(&sentinel == result);
+  fake_note_c_new_request_command.return_json = nullptr;
+  CHECK(nullptr == notecard.newCommand("note.add"));
+  CHECK(2 == fake_note_c_new_request_command.new_command_calls);
 }
 
 TEST_CASE("test_notecard_sendRequest_does_not_modify_j_object_parameter_value_before_passing_to_note_c", "[Notecard]")
