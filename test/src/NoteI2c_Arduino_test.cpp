@@ -1101,3 +1101,130 @@ TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_unexpected_i2c
   CHECK(ACTUAL_RESULT);
   CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
 }
+
+// Serial-Over-I2C Notecard-side bus model for large user-data sizes.
+// Host writes {0, count}; Notecard answers {available, count, data...}.
+namespace {
+struct NotecardBusModel {
+  uint8_t written[2];
+  size_t written_count;
+  uint8_t reply[NoteI2c::REQUEST_MAX_SIZE + 2];
+  size_t reply_size;
+  size_t reply_position;
+  uint8_t available_to_report;
+} notecard_bus_model;
+
+uint8_t data_byte_at(size_t index) { return static_cast<uint8_t>((index * 7) + 3); }
+
+size_t modelBusWrite(uint8_t byte)
+{
+  if (notecard_bus_model.written_count < sizeof(notecard_bus_model.written)) {
+    notecard_bus_model.written[notecard_bus_model.written_count] = byte;
+  }
+  ++notecard_bus_model.written_count;
+  return 1;
+}
+
+uint8_t modelBusRequestFrom(int, int quantity)
+{
+  const size_t count = notecard_bus_model.written[1];
+  notecard_bus_model.reply[0] = notecard_bus_model.available_to_report;
+  notecard_bus_model.reply[1] = static_cast<uint8_t>(count);
+  for (size_t i = 0 ; i < count ; ++i) {
+    notecard_bus_model.reply[2 + i] = data_byte_at(i);
+  }
+  notecard_bus_model.reply_size = (count + NoteI2c::REQUEST_HEADER_SIZE);
+  notecard_bus_model.reply_position = 0;
+  (void)quantity;
+  return static_cast<uint8_t>(notecard_bus_model.reply_size);  // Wire returns uint8_t
+}
+
+int modelBusRead(void)
+{
+  if (notecard_bus_model.reply_position < notecard_bus_model.reply_size) {
+    return notecard_bus_model.reply[notecard_bus_model.reply_position++];
+  }
+  return -1;
+}
+}  // namespace
+
+// SPEC-GAP: When receive() is asked for 254 or more bytes of user data, the documented API, NoteI2c.hpp, and note-c are silent on the required outcome (error, truncate, wrap, or unspecified). note-c never asks for more than 253. This PR does not lock behavior above 253.
+
+TEST_CASE("test_notei2c_arduino_receive_accepts_253_bytes_of_user_data", "[NoteI2c_Arduino][receive]")
+{
+  resetFakes();
+  // Arrange
+  // Max user data is 253 bytes (total request 255 minus the 2-byte header).
+  const size_t USER_DATA_SIZE = 253;
+  const uint16_t EXPECTED_ADDRESS = 0x17;
+  const uint32_t REPORTED_AVAILABLE = 5;
+  uint8_t response_buffer[NoteI2c::REQUEST_MAX_SIZE];
+  memset(response_buffer, 0xAA, sizeof(response_buffer));
+  uint32_t bytes_remaining = 0;
+
+  memset(&notecard_bus_model, 0, sizeof(notecard_bus_model));
+  notecard_bus_model.available_to_report = REPORTED_AVAILABLE;
+  RESET_FAKE(TwoWire_write_byte);
+  TwoWire_write_byte_fake.custom_fake = modelBusWrite;
+  RESET_FAKE(TwoWire_requestFrom);
+  TwoWire_requestFrom_fake.custom_fake = modelBusRequestFrom;
+  RESET_FAKE(TwoWire_read);
+  TwoWire_read_fake.custom_fake = modelBusRead;
+  NoteI2c_Arduino notei2c(Wire);
+
+  // Action
+  const char * const ACTUAL_RESULT = notei2c.receive(
+    EXPECTED_ADDRESS,
+    response_buffer,
+    static_cast<uint16_t>(USER_DATA_SIZE),
+    &bytes_remaining
+  );
+
+  // Assert
+  CHECK(nullptr == ACTUAL_RESULT);
+  CHECK(REPORTED_AVAILABLE == bytes_remaining);
+  bool data_matches = true;
+  for (size_t i = 0 ; i < USER_DATA_SIZE ; ++i) {
+    data_matches = (data_matches && (data_byte_at(i) == response_buffer[i]));
+  }
+  CHECK(data_matches);
+  CHECK(0xAA == response_buffer[USER_DATA_SIZE]);  // No byte past the user data is written
+}
+
+TEST_CASE("test_notei2c_arduino_receive_requests_a_total_of_255_bytes_including_the_2_byte_header_when_user_data_is_253", "[NoteI2c_Arduino][receive]")
+{
+  resetFakes();
+  // Arrange
+  // Total request with header is 255 bytes: 253 user data + 2-byte header.
+  const size_t USER_DATA_SIZE = 253;
+  const size_t TOTAL_WITH_HEADER = 255;
+  const uint16_t EXPECTED_ADDRESS = 0x17;
+  uint8_t response_buffer[NoteI2c::REQUEST_MAX_SIZE];
+  uint32_t bytes_remaining = 0;
+
+  memset(&notecard_bus_model, 0, sizeof(notecard_bus_model));
+  notecard_bus_model.available_to_report = 0;
+  RESET_FAKE(TwoWire_write_byte);
+  TwoWire_write_byte_fake.custom_fake = modelBusWrite;
+  RESET_FAKE(TwoWire_requestFrom);
+  TwoWire_requestFrom_fake.custom_fake = modelBusRequestFrom;
+  RESET_FAKE(TwoWire_read);
+  TwoWire_read_fake.custom_fake = modelBusRead;
+  NoteI2c_Arduino notei2c(Wire);
+
+  // Action
+  const char * const ACTUAL_RESULT = notei2c.receive(
+    EXPECTED_ADDRESS,
+    response_buffer,
+    static_cast<uint16_t>(USER_DATA_SIZE),
+    &bytes_remaining
+  );
+
+  // Assert
+  CHECK(nullptr == ACTUAL_RESULT);
+  CHECK(NoteI2c::REQUEST_MAX_SIZE == TOTAL_WITH_HEADER);
+  CHECK(NoteI2c::REQUEST_HEADER_SIZE == 2);
+  CHECK(TwoWire_requestFrom_fake.arg1_val == static_cast<int>(TOTAL_WITH_HEADER));
+  CHECK(TwoWire_requestFrom_fake.arg1_val == static_cast<int>(USER_DATA_SIZE + NoteI2c::REQUEST_HEADER_SIZE));
+  CHECK(notecard_bus_model.written[1] == USER_DATA_SIZE);
+}
