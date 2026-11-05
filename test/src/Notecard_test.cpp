@@ -22,6 +22,103 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+
+namespace {
+
+// Stateful fakes for Notecard static serial thunks (X5 static-serial-callbacks).
+// Unique names for merge with #22–#29. Captures NoteSetFnSerialDefault hooks and
+// NoteSerial_* effects so noteSerialAvailable/Receive/Reset/Transmit outcomes
+// are observable.
+
+struct FakeNoteCStaticSerialBusHooks {
+    serialResetFn reset;
+    serialTransmitFn transmit;
+    serialAvailableFn available;
+    serialReceiveFn receive;
+};
+FakeNoteCStaticSerialBusHooks fake_note_c_static_serial_hooks;
+
+struct FakeNoteCStaticSerialEffects {
+    int available_calls;
+    size_t available_return;
+    int receive_calls;
+    char receive_return;
+    int reset_calls;
+    bool reset_return;
+    int transmit_calls;
+    uint8_t * transmit_text;
+    size_t transmit_len;
+    bool transmit_flush;
+};
+FakeNoteCStaticSerialEffects fake_note_c_static_serial_effects;
+
+void fakeNoteSetFnSerialDefaultStaticSerial(serialResetFn reset, serialTransmitFn transmit, serialAvailableFn available, serialReceiveFn receive)
+{
+    fake_note_c_static_serial_hooks.reset = reset;
+    fake_note_c_static_serial_hooks.transmit = transmit;
+    fake_note_c_static_serial_hooks.available = available;
+    fake_note_c_static_serial_hooks.receive = receive;
+}
+
+size_t fakeNoteSerialAvailableStaticSerial(void)
+{
+    fake_note_c_static_serial_effects.available_calls += 1;
+    return fake_note_c_static_serial_effects.available_return;
+}
+
+char fakeNoteSerialReceiveStaticSerial(void)
+{
+    fake_note_c_static_serial_effects.receive_calls += 1;
+    return fake_note_c_static_serial_effects.receive_return;
+}
+
+bool fakeNoteSerialResetStaticSerial(void)
+{
+    fake_note_c_static_serial_effects.reset_calls += 1;
+    return fake_note_c_static_serial_effects.reset_return;
+}
+
+size_t fakeNoteSerialTransmitStaticSerial(uint8_t * text, size_t len, bool flush)
+{
+    fake_note_c_static_serial_effects.transmit_calls += 1;
+    fake_note_c_static_serial_effects.transmit_text = text;
+    fake_note_c_static_serial_effects.transmit_len = len;
+    fake_note_c_static_serial_effects.transmit_flush = flush;
+    return len;
+}
+
+// Call after resetFakes(). Captures NoteSetFnSerialDefault hooks from begin(&serial).
+void useFakeNoteCStaticSerialBusHooks(void)
+{
+    fake_note_c_static_serial_hooks.reset = nullptr;
+    fake_note_c_static_serial_hooks.transmit = nullptr;
+    fake_note_c_static_serial_hooks.available = nullptr;
+    fake_note_c_static_serial_hooks.receive = nullptr;
+    NoteSetFnSerialDefault_fake.custom_fake = fakeNoteSetFnSerialDefaultStaticSerial;
+}
+
+// Call after begin (and typically after RESET of NoteSerial_*). Captures
+// NoteSerial_* so static thunks can be shown to forward or not.
+void useFakeNoteSerialStaticSerial(void)
+{
+    fake_note_c_static_serial_effects.available_calls = 0;
+    fake_note_c_static_serial_effects.available_return = 0;
+    fake_note_c_static_serial_effects.receive_calls = 0;
+    fake_note_c_static_serial_effects.receive_return = '\0';
+    fake_note_c_static_serial_effects.reset_calls = 0;
+    fake_note_c_static_serial_effects.reset_return = false;
+    fake_note_c_static_serial_effects.transmit_calls = 0;
+    fake_note_c_static_serial_effects.transmit_text = nullptr;
+    fake_note_c_static_serial_effects.transmit_len = 0;
+    fake_note_c_static_serial_effects.transmit_flush = false;
+    NoteSerial_available_fake.custom_fake = fakeNoteSerialAvailableStaticSerial;
+    NoteSerial_receive_fake.custom_fake = fakeNoteSerialReceiveStaticSerial;
+    NoteSerial_reset_fake.custom_fake = fakeNoteSerialResetStaticSerial;
+    NoteSerial_transmit_fake.custom_fake = fakeNoteSerialTransmitStaticSerial;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -2667,457 +2764,346 @@ TEST_CASE("test_static_callback_note_log_print_returns_false_when_interface_has_
   CHECK(!NoteLog_print_fake.call_count);
 }
 
-TEST_CASE("test_static_callback_note_serial_available_invokes_noteserial_available", "[Notecard]")
+
+// X5 static-serial-callbacks outcomes: noteSerialAvailable/Receive/Reset/Transmit
+// forward to NoteSerial_* when set, and return false/'\\0' without calling when null.
+// Tags: [Notecard][static-serial-callbacks].
+TEST_CASE("test_static_callback_note_serial_available_forwards_to_the_serial_interface_when_serial_is_set", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
   Notecard notecard;
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialAvailableFn noteSerialAvailable = NoteSetFnSerialDefault_fake.arg2_val;  // Capture the internal Notecard serial function, `noteSerialAvailable`
-  RESET_FAKE(NoteSerial_available);  // Clear the structure for testing results
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.available);
+  useFakeNoteSerialStaticSerial();
 
-   // Action
-  ///////////
+  // Action
+  fake_note_c_static_serial_hooks.available();
 
-  noteSerialAvailable();
-
-   // Assert
-  ///////////
-
-  CHECK(NoteSerial_available_fake.call_count);
+  // Assert
+  CHECK(1 == fake_note_c_static_serial_effects.available_calls);
 }
 
-TEST_CASE("test_static_callback_note_serial_available_does_not_modify_interface_method_return_value", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_available_returns_the_serial_interface_result_when_serial_is_set", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
   Notecard notecard;
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialAvailableFn noteSerialAvailable = NoteSetFnSerialDefault_fake.arg2_val;  // Capture the internal Notecard serial function, `noteSerialAvailable`
-  RESET_FAKE(NoteSerial_available);  // Clear the structure for testing results
-  NoteSerial_available_fake.return_val = true;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.available);
+  useFakeNoteSerialStaticSerial();
+  fake_note_c_static_serial_effects.available_return = 1;
 
-   // Action
-  ///////////
+  // Action
+  const bool result = fake_note_c_static_serial_hooks.available();
 
-  const bool ACTUAL_RESULT = noteSerialAvailable();
-
-   // Assert
-  ///////////
-
-  CHECK(ACTUAL_RESULT == NoteSerial_available_fake.return_val);
+  // Assert
+  CHECK(true == result);
+  CHECK(1 == fake_note_c_static_serial_effects.available_calls);
 }
 
-TEST_CASE("test_static_callback_note_serial_available_does_not_call_interface_method_when_interface_has_not_been_instantiated", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_available_does_not_call_the_serial_interface_when_serial_is_null", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
   Notecard notecard;
-
-  // Capture the internal Notecard log function, `noteSerialAvailable`
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialAvailableFn noteSerialAvailable = NoteSetFnSerialDefault_fake.arg2_val;  // Capture the internal Notecard serial function, `noteSerialAvailable`
-
-  // Reset to ensure the interface is not instantiated
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.available);
+  serialAvailableFn available = fake_note_c_static_serial_hooks.available;
   notecard.begin(static_cast<NoteSerial *>(nullptr));
-  RESET_FAKE(NoteSerial_available);  // Clear the structure for testing results
+  useFakeNoteSerialStaticSerial();
 
-   // Action
-  ///////////
+  // Action
+  available();
 
-  noteSerialAvailable();
-
-   // Assert
-  ///////////
-
-  CHECK(!NoteSerial_available_fake.call_count);
+  // Assert
+  CHECK(0 == fake_note_c_static_serial_effects.available_calls);
 }
 
-TEST_CASE("test_static_callback_note_serial_available_returns_false_when_interface_has_not_been_instantiated", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_available_returns_false_when_serial_is_null", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
   Notecard notecard;
-
-  // Capture the internal Notecard log function, `noteSerialAvailable`
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialAvailableFn noteSerialAvailable = NoteSetFnSerialDefault_fake.arg2_val;  // Capture the internal Notecard serial function, `noteSerialAvailable`
-
-  // Reset to ensure the interface is not instantiated
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.available);
+  serialAvailableFn available = fake_note_c_static_serial_hooks.available;
   notecard.begin(static_cast<NoteSerial *>(nullptr));
-  RESET_FAKE(NoteSerial_available);  // Clear the structure for testing results
-  NoteSerial_available_fake.return_val = true;  // Ensure that if the mock were to be invoked the test would fail
+  useFakeNoteSerialStaticSerial();
+  fake_note_c_static_serial_effects.available_return = 1;
 
-   // Action
-  ///////////
+  // Action
+  const bool result = available();
 
-  const bool ACTUAL_RESULT = noteSerialAvailable();
-
-   // Assert
-  ///////////
-
-  CHECK(!ACTUAL_RESULT);
+  // Assert
+  CHECK(false == result);
+  CHECK(0 == fake_note_c_static_serial_effects.available_calls);
 }
 
-TEST_CASE("test_static_callback_note_serial_receive_invokes_noteserial_receive", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_receive_forwards_to_the_serial_interface_when_serial_is_set", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
   Notecard notecard;
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialReceiveFn noteSerialReceive = NoteSetFnSerialDefault_fake.arg3_val;  // Capture the internal Notecard serial function, `noteSerialReceive`
-  RESET_FAKE(NoteSerial_receive);  // Clear the structure for testing results
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.receive);
+  useFakeNoteSerialStaticSerial();
 
-   // Action
-  ///////////
+  // Action
+  fake_note_c_static_serial_hooks.receive();
 
-  noteSerialReceive();
-
-   // Assert
-  ///////////
-
-  CHECK(NoteSerial_receive_fake.call_count);
+  // Assert
+  CHECK(1 == fake_note_c_static_serial_effects.receive_calls);
 }
 
-TEST_CASE("test_static_callback_note_serial_receive_does_not_modify_interface_method_return_value", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_receive_returns_the_serial_interface_result_when_serial_is_set", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
   Notecard notecard;
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialReceiveFn noteSerialReceive = NoteSetFnSerialDefault_fake.arg3_val;  // Capture the internal Notecard serial function, `noteSerialReceive`
-  RESET_FAKE(NoteSerial_receive);  // Clear the structure for testing results
-  NoteSerial_receive_fake.return_val = 'Z';
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.receive);
+  useFakeNoteSerialStaticSerial();
+  fake_note_c_static_serial_effects.receive_return = 'Z';
 
-   // Action
-  ///////////
+  // Action
+  const char result = fake_note_c_static_serial_hooks.receive();
 
-  const char ACTUAL_RESULT = noteSerialReceive();
-
-   // Assert
-  ///////////
-
-  CHECK(ACTUAL_RESULT == NoteSerial_receive_fake.return_val);
+  // Assert
+  CHECK('Z' == result);
+  CHECK(1 == fake_note_c_static_serial_effects.receive_calls);
 }
 
-TEST_CASE("test_static_callback_note_serial_receive_does_not_call_interface_method_when_interface_has_not_been_instantiated", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_receive_does_not_call_the_serial_interface_when_serial_is_null", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
   Notecard notecard;
-
-  // Capture the internal Notecard log function, `noteSerialAvailable`
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialReceiveFn noteSerialReceive = NoteSetFnSerialDefault_fake.arg3_val;  // Capture the internal Notecard serial function, `noteSerialReceive`
-
-  // Reset to ensure the interface is not instantiated
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.receive);
+  serialReceiveFn receive = fake_note_c_static_serial_hooks.receive;
   notecard.begin(static_cast<NoteSerial *>(nullptr));
-  RESET_FAKE(NoteSerial_receive);  // Clear the structure for testing results
+  useFakeNoteSerialStaticSerial();
 
-   // Action
-  ///////////
+  // Action
+  receive();
 
-  noteSerialReceive();
-
-   // Assert
-  ///////////
-
-  CHECK(!NoteSerial_receive_fake.call_count);
+  // Assert
+  CHECK(0 == fake_note_c_static_serial_effects.receive_calls);
 }
 
-TEST_CASE("test_static_callback_note_serial_receive_returns_false_when_interface_has_not_been_instantiated", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_receive_returns_nul_when_serial_is_null", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
-  static const char EXPECTED_RESULT = '\0';
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
   Notecard notecard;
-
-  // Capture the internal Notecard log function, `noteSerialAvailable`
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialReceiveFn noteSerialReceive = NoteSetFnSerialDefault_fake.arg3_val;  // Capture the internal Notecard serial function, `noteSerialReceive`
-
-  // Reset to ensure the interface is not instantiated
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.receive);
+  serialReceiveFn receive = fake_note_c_static_serial_hooks.receive;
   notecard.begin(static_cast<NoteSerial *>(nullptr));
-  RESET_FAKE(NoteSerial_receive);  // Clear the structure for testing results
-  NoteSerial_receive_fake.return_val = 'Z';
+  useFakeNoteSerialStaticSerial();
+  fake_note_c_static_serial_effects.receive_return = 'Z';
 
-   // Action
-  ///////////
+  // Action
+  const char result = receive();
 
-  const char ACTUAL_RESULT = noteSerialReceive();
-
-   // Assert
-  ///////////
-
-  CHECK(ACTUAL_RESULT == EXPECTED_RESULT);
+  // Assert
+  CHECK('\0' == result);
+  CHECK(0 == fake_note_c_static_serial_effects.receive_calls);
 }
 
-TEST_CASE("test_static_callback_note_serial_reset_invokes_noteserial_reset", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_reset_forwards_to_the_serial_interface_when_serial_is_set", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
   Notecard notecard;
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialResetFn noteSerialReset = NoteSetFnSerialDefault_fake.arg0_val;  // Capture the internal Notecard serial function, `noteSerialReset`
-  RESET_FAKE(NoteSerial_reset);  // Clear the structure for testing results
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.reset);
+  useFakeNoteSerialStaticSerial();
 
-   // Action
-  ///////////
+  // Action
+  fake_note_c_static_serial_hooks.reset();
 
-  noteSerialReset();
-
-   // Assert
-  ///////////
-
-  CHECK(NoteSerial_reset_fake.call_count);
+  // Assert
+  CHECK(1 == fake_note_c_static_serial_effects.reset_calls);
 }
 
-TEST_CASE("test_static_callback_note_serial_reset_does_not_modify_interface_method_return_value", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_reset_returns_the_serial_interface_result_when_serial_is_set", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
   Notecard notecard;
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialResetFn noteSerialReset = NoteSetFnSerialDefault_fake.arg0_val;  // Capture the internal Notecard serial function, `noteSerialReset`
-  RESET_FAKE(NoteSerial_reset);  // Clear the structure for testing results
-  NoteSerial_reset_fake.return_val = true;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.reset);
+  useFakeNoteSerialStaticSerial();
+  fake_note_c_static_serial_effects.reset_return = true;
 
-   // Action
-  ///////////
+  // Action
+  const bool result = fake_note_c_static_serial_hooks.reset();
 
-  const bool ACTUAL_RESULT = noteSerialReset();
-
-   // Assert
-  ///////////
-
-  CHECK(ACTUAL_RESULT == NoteSerial_reset_fake.return_val);
+  // Assert
+  CHECK(true == result);
+  CHECK(1 == fake_note_c_static_serial_effects.reset_calls);
 }
 
-TEST_CASE("test_static_callback_note_serial_reset_does_not_call_interface_method_when_interface_has_not_been_instantiated", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_reset_does_not_call_the_serial_interface_when_serial_is_null", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
   Notecard notecard;
-
-  // Capture the internal Notecard log function, `noteSerialAvailable`
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialResetFn noteSerialReset = NoteSetFnSerialDefault_fake.arg0_val;  // Capture the internal Notecard serial function, `noteSerialReset`
-
-  // Reset to ensure the interface is not instantiated
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.reset);
+  serialResetFn reset = fake_note_c_static_serial_hooks.reset;
   notecard.begin(static_cast<NoteSerial *>(nullptr));
-  RESET_FAKE(NoteSerial_reset);  // Clear the structure for testing results
+  useFakeNoteSerialStaticSerial();
 
-   // Action
-  ///////////
+  // Action
+  reset();
 
-  noteSerialReset();
-
-   // Assert
-  ///////////
-
-  CHECK(!NoteSerial_reset_fake.call_count);
+  // Assert
+  CHECK(0 == fake_note_c_static_serial_effects.reset_calls);
 }
 
-TEST_CASE("test_static_callback_note_serial_reset_returns_false_when_interface_has_not_been_instantiated", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_reset_returns_false_when_serial_is_null", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
   Notecard notecard;
-
-  // Capture the internal Notecard log function, `noteSerialAvailable`
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialResetFn noteSerialReset = NoteSetFnSerialDefault_fake.arg0_val;  // Capture the internal Notecard serial function, `noteSerialReset`
-
-  // Reset to ensure the interface is not instantiated
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.reset);
+  serialResetFn reset = fake_note_c_static_serial_hooks.reset;
   notecard.begin(static_cast<NoteSerial *>(nullptr));
-  RESET_FAKE(NoteSerial_reset);  // Clear the structure for testing results
-  NoteSerial_reset_fake.return_val = true;
+  useFakeNoteSerialStaticSerial();
+  fake_note_c_static_serial_effects.reset_return = true;
 
-   // Action
-  ///////////
+  // Action
+  const bool result = reset();
 
-  const bool ACTUAL_RESULT = noteSerialReset();
-
-   // Assert
-  ///////////
-
-  CHECK(!ACTUAL_RESULT);
+  // Assert
+  CHECK(false == result);
+  CHECK(0 == fake_note_c_static_serial_effects.reset_calls);
 }
 
-TEST_CASE("test_static_callback_note_serial_transmit_invokes_noteserial_transmit", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_transmit_forwards_to_the_serial_interface_when_serial_is_set", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.transmit);
+  useFakeNoteSerialStaticSerial();
   uint8_t text[] = "Test passed!";
-  static const size_t LEN = sizeof(text);
-  static const bool FLUSH = true;
 
-  Notecard notecard;
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialTransmitFn noteSerialTransmit = NoteSetFnSerialDefault_fake.arg1_val;  // Capture the internal Notecard serial function, `noteSerialTransmit`
-  RESET_FAKE(NoteSerial_transmit);  // Clear the structure for testing results
+  // Action
+  fake_note_c_static_serial_hooks.transmit(text, sizeof(text), true);
 
-   // Action
-  ///////////
-
-  noteSerialTransmit(text, LEN, FLUSH);
-
-   // Assert
-  ///////////
-
-  CHECK(NoteSerial_transmit_fake.call_count);
+  // Assert
+  CHECK(1 == fake_note_c_static_serial_effects.transmit_calls);
 }
 
-TEST_CASE("test_static_callback_note_serial_transmit_does_not_modify_text_parameter_before_passing_to_interface_method", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_transmit_forwards_the_text_pointer_when_serial_is_set", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
-  uint8_t expected_text[] = "Test passed!";
-  const size_t LEN = sizeof(expected_text);
-  const bool FLUSH = true;
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
   Notecard notecard;
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialTransmitFn noteSerialTransmit = NoteSetFnSerialDefault_fake.arg1_val;  // Capture the internal Notecard serial function, `noteSerialTransmit`
-  RESET_FAKE(NoteSerial_transmit);  // Clear the structure for testing results
-
-   // Action
-  ///////////
-
-  noteSerialTransmit(expected_text, LEN, FLUSH);
-
-   // Assert
-  ///////////
-
-  CHECK(!strcmp(reinterpret_cast<char *>(expected_text),reinterpret_cast<char *>(NoteSerial_transmit_fake.arg0_val)));
-}
-
-TEST_CASE("test_static_callback_note_serial_transmit_does_not_modify_length_parameter_before_passing_to_interface_method", "[Notecard]")
-{
-  resetFakes();
-   // Arrange
-  ////////////
-
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.transmit);
+  useFakeNoteSerialStaticSerial();
   uint8_t text[] = "Test passed!";
-  const size_t EXPECTED_LEN = sizeof(text);
-  const bool FLUSH = true;
 
-  Notecard notecard;
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialTransmitFn noteSerialTransmit = NoteSetFnSerialDefault_fake.arg1_val;  // Capture the internal Notecard serial function, `noteSerialTransmit`
-  RESET_FAKE(NoteSerial_transmit);  // Clear the structure for testing results
+  // Action
+  fake_note_c_static_serial_hooks.transmit(text, sizeof(text), true);
 
-   // Action
-  ///////////
-
-  noteSerialTransmit(text, EXPECTED_LEN, FLUSH);
-
-   // Assert
-  ///////////
-
-  CHECK(EXPECTED_LEN == NoteSerial_transmit_fake.arg1_val);
+  // Assert
+  CHECK(text == fake_note_c_static_serial_effects.transmit_text);
 }
 
-TEST_CASE("test_static_callback_note_serial_transmit_does_not_modify_flush_parameter_before_passing_to_interface_method", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_transmit_forwards_the_length_when_serial_is_set", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.transmit);
+  useFakeNoteSerialStaticSerial();
   uint8_t text[] = "Test passed!";
   const size_t LEN = sizeof(text);
-  const bool EXPECTED_FLUSH = true;
 
-  Notecard notecard;
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialTransmitFn noteSerialTransmit = NoteSetFnSerialDefault_fake.arg1_val;  // Capture the internal Notecard serial function, `noteSerialTransmit`
-  RESET_FAKE(NoteSerial_transmit);  // Clear the structure for testing results
+  // Action
+  fake_note_c_static_serial_hooks.transmit(text, LEN, true);
 
-   // Action
-  ///////////
-
-  noteSerialTransmit(text, LEN, EXPECTED_FLUSH);
-
-   // Assert
-  ///////////
-
-  CHECK(EXPECTED_FLUSH == NoteSerial_transmit_fake.arg2_val);
+  // Assert
+  CHECK(LEN == fake_note_c_static_serial_effects.transmit_len);
 }
 
-TEST_CASE("test_static_callback_note_serial_transmit_does_not_call_interface_method_when_interface_has_not_been_instantiated", "[Notecard]")
+TEST_CASE("test_static_callback_note_serial_transmit_forwards_the_flush_flag_when_serial_is_set", "[Notecard][static-serial-callbacks]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
-  uint8_t text[] = "Test passed!";
-  const size_t LEN = sizeof(text);
-  const bool EXPECTED_FLUSH = true;
-
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
   Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.transmit);
+  useFakeNoteSerialStaticSerial();
+  uint8_t text[] = "Test passed!";
 
-  // Capture the internal Notecard log function, `noteSerialAvailable`
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  notecard.begin(&fakeSerial);  // Provides access to the hidden static callback methods through `note-c` mocks
-  serialTransmitFn noteSerialTransmit = NoteSetFnSerialDefault_fake.arg1_val;  // Capture the internal Notecard serial function, `noteSerialTransmit`
+  // Action
+  fake_note_c_static_serial_hooks.transmit(text, sizeof(text), true);
 
-  // Reset to ensure the interface is not instantiated
+  // Assert
+  CHECK(true == fake_note_c_static_serial_effects.transmit_flush);
+}
+
+TEST_CASE("test_static_callback_note_serial_transmit_does_not_call_the_serial_interface_when_serial_is_null", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.transmit);
+  serialTransmitFn transmit = fake_note_c_static_serial_hooks.transmit;
   notecard.begin(static_cast<NoteSerial *>(nullptr));
-  RESET_FAKE(NoteSerial_transmit);  // Clear the structure for testing results
+  useFakeNoteSerialStaticSerial();
+  uint8_t text[] = "Test passed!";
 
-   // Action
-  ///////////
+  // Action
+  transmit(text, sizeof(text), true);
 
-  noteSerialTransmit(text, LEN, EXPECTED_FLUSH);
-
-   // Assert
-  ///////////
-
-  CHECK(!NoteSerial_transmit_fake.call_count);
+  // Assert
+  CHECK(0 == fake_note_c_static_serial_effects.transmit_calls);
 }
 
 TEST_CASE("test_static_callback_note_txn_start_invokes_notetxn_start", "[Notecard]")
