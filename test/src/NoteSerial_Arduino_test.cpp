@@ -20,15 +20,25 @@ static void resetFakes(void)
 
 namespace {
 
-// Stateful fake of the transmit side of a serial port.
-// It is built on the FFF fake HardwareSerial_write (custom_fake). The state is
-// a plain struct, because an FFF custom_fake is a function pointer.
+// Stateful fake of the serial port (write, begin, and end).
+// It is built on the FFF fakes HardwareSerial_write, HardwareSerial_begin, and
+// HardwareSerial_end (custom_fake). The state is a plain struct, because an FFF
+// custom_fake is a function pointer.
 // Every write call appends the bytes the port accepted to bytes_written.
+// begin records that the port is open and the baud it was begun at.
+// end records that the port is closed (is_open becomes false).
+// FakeSerialPort fields match the begin/end/reset groups (PR #14–#16) exactly.
 struct FakeSerialPort {
     std::string bytes_written;       // everything the port accepted, in order
     size_t max_bytes_per_write;      // the port accepts at most this many bytes per write call
+    bool is_open;                    // true after begin has opened the port
+    unsigned int baud_rate;          // baud the port was begun at (last begin)
 };
 FakeSerialPort fake_serial_port;
+
+// Companion ordered log for begin/end hooks (not a FakeSerialPort field). Appends
+// 'E' on end and 'B' on begin (same companion as the reset group, PR #16).
+std::string fake_serial_port_lifecycle;
 
 size_t fakeSerialPortWrite(uint8_t * buffer, size_t size)
 {
@@ -37,7 +47,20 @@ size_t fakeSerialPortWrite(uint8_t * buffer, size_t size)
     return accepted;
 }
 
-// Install the fake port in place of the capture fake. Call after resetFakes().
+void fakeSerialPortBegin(unsigned int baud)
+{
+    fake_serial_port.is_open = true;
+    fake_serial_port.baud_rate = baud;
+    fake_serial_port_lifecycle.push_back('B');
+}
+
+void fakeSerialPortEnd(void)
+{
+    fake_serial_port.is_open = false;
+    fake_serial_port_lifecycle.push_back('E');
+}
+
+// Install the fake port write side. Call after resetFakes().
 void useFakeSerialPort(size_t max_bytes_per_write = SIZE_MAX)
 {
     fake_serial_port.bytes_written.clear();
@@ -45,57 +68,115 @@ void useFakeSerialPort(size_t max_bytes_per_write = SIZE_MAX)
     HardwareSerial_write_fake.custom_fake = fakeSerialPortWrite;
 }
 
+// Install the fake port begin side. Call after resetFakes().
+// Field layout matches the begin/end/reset groups (PR #14–#16).
+void useFakeSerialPortBegin(void)
+{
+    fake_serial_port.is_open = false;
+    fake_serial_port.baud_rate = 0;
+    fake_serial_port_lifecycle.clear();
+    HardwareSerial_begin_fake.custom_fake = fakeSerialPortBegin;
+}
+
+// Install the fake port end side. Call after resetFakes() (and typically after
+// useFakeSerialPortBegin when the test also needs the constructor to open).
+void useFakeSerialPortEnd(void)
+{
+    HardwareSerial_end_fake.custom_fake = fakeSerialPortEnd;
+}
+
 } // namespace
 
-TEST_CASE("test_make_note_serial_instantiates_noteserial_object", "[NoteSerial_Arduino]")
+TEST_CASE("test_make_note_serial_returns_a_usable_noteserial_that_opens_the_serial_port_and_transmits_to_it", "[NoteSerial_Arduino][factory]")
 {
   resetFakes();
     // Arrange
-    NoteSerial * noteserial = nullptr;
+    // make_note_serial must return a usable NoteSerial: constructing it opens
+    // the port at the parameters baud, and transmit writes to that port.
+    useFakeSerialPortBegin();
+    useFakeSerialPortEnd();
     MakeNoteSerial_ArduinoParameters<HardwareSerial> arduino_parameters(Serial, 9600);
 
     // Action
-    noteserial = make_note_serial<MakeNoteSerial_ArduinoParameters<HardwareSerial>>(arduino_parameters);
+    NoteSerial * noteserial = make_note_serial<MakeNoteSerial_ArduinoParameters<HardwareSerial>>(arduino_parameters);
 
-    // Assert
+    // Assert — opened by the NoteSerial_Arduino constructor
     CHECK(nullptr != noteserial);
+    CHECK(fake_serial_port.is_open);
+    CHECK(9600u == fake_serial_port.baud_rate);
+
+    // Assert — usable for transmit
+    useFakeSerialPort();
+    char buffer[] = "factory";
+    const size_t written = noteserial->transmit(reinterpret_cast<uint8_t *>(buffer), strlen(buffer), false);
+    CHECK(7 == written);
+    CHECK("factory" == fake_serial_port.bytes_written);
 
     // Clean-up
     make_note_serial(nullptr);
 }
 
-TEST_CASE("test_make_note_serial_enforces_singleton_by_returning_same_noteserial_object_for_all_calls", "[NoteSerial_Arduino]")
+TEST_CASE("test_make_note_serial_returns_the_same_noteserial_object_on_repeated_calls", "[NoteSerial_Arduino][factory]")
 {
   resetFakes();
     // Arrange
+    useFakeSerialPortBegin();
+    useFakeSerialPortEnd();
     MakeNoteSerial_ArduinoParameters<HardwareSerial> arduino_parameters(Serial, 9600);
     NoteSerial * const noteserial_1 = make_note_serial<MakeNoteSerial_ArduinoParameters<HardwareSerial>>(arduino_parameters);
+    const std::string lifecycle_after_first = fake_serial_port_lifecycle;
 
     // Action
     NoteSerial * const noteserial_2 = make_note_serial<MakeNoteSerial_ArduinoParameters<HardwareSerial>>(arduino_parameters);
 
-    // Assert
+    // Assert — same object; second call does not construct (no second begin)
     CHECK(noteserial_1 == noteserial_2);
+    CHECK(lifecycle_after_first == fake_serial_port_lifecycle);
 
     // Clean-up
     make_note_serial(nullptr);
 }
 
-//int test_make_note_serial_returns_nullptr_when_nullptr_is_passed_as_parameter()
-TEST_CASE("test_make_note_serial_deletes_singleton_when_nullptr_is_passed_as_parameter", "[NoteSerial_Arduino]")
+TEST_CASE("test_make_note_serial_nullptr_deletes_the_singleton_so_a_later_call_creates_a_new_working_object", "[NoteSerial_Arduino][factory]")
 {
   resetFakes();
     // Arrange
+    // Pointer identity after delete/new is not reliable (heap can reuse the
+    // address). Observe delete via closed port + nullptr, and recreate via a
+    // second begin in the lifecycle and a working transmit.
+    useFakeSerialPortBegin();
+    useFakeSerialPortEnd();
     MakeNoteSerial_ArduinoParameters<HardwareSerial> arduino_parameters(Serial, 9600);
-    NoteSerial * noteserial = make_note_serial<MakeNoteSerial_ArduinoParameters<HardwareSerial>>(arduino_parameters);
-    assert(noteserial);
+    NoteSerial * noteserial_1 = make_note_serial<MakeNoteSerial_ArduinoParameters<HardwareSerial>>(arduino_parameters);
+    CHECK(nullptr != noteserial_1);
+    CHECK(fake_serial_port.is_open);
+    CHECK("B" == fake_serial_port_lifecycle);
 
-    // Action
-    noteserial = make_note_serial(nullptr);
+    // Action — delete
+    NoteSerial * deleted = make_note_serial(nullptr);
 
-    // Assert
-    CHECK(nullptr == noteserial);
+    // Assert — nullptr returned; destructor closed the port
+    CHECK(nullptr == deleted);
+    CHECK_FALSE(fake_serial_port.is_open);
+    CHECK("BE" == fake_serial_port_lifecycle);
+
+    // Action — recreate
+    NoteSerial * noteserial_2 = make_note_serial<MakeNoteSerial_ArduinoParameters<HardwareSerial>>(arduino_parameters);
+
+    // Assert — new working object (second begin; port open; transmit works)
+    CHECK(nullptr != noteserial_2);
+    CHECK("BEB" == fake_serial_port_lifecycle);
+    CHECK(fake_serial_port.is_open);
+    CHECK(9600u == fake_serial_port.baud_rate);
+    useFakeSerialPort();
+    char buffer[] = "again";
+    CHECK(5 == noteserial_2->transmit(reinterpret_cast<uint8_t *>(buffer), strlen(buffer), false));
+    CHECK("again" == fake_serial_port.bytes_written);
+
+    // Clean-up
+    make_note_serial(nullptr);
 }
+
 
 TEST_CASE("test_noteserial_arduino_constructor_invokes_hardware_serial_parameter_begin_method", "[NoteSerial_Arduino]")
 {
