@@ -311,62 +311,6 @@ TEST_CASE("test_noteserial_arduino_reset_returns_true", "[NoteSerial_Arduino][re
     CHECK(ACTUAL_RESULT);
 }
 
-TEST_CASE("test_noteserial_arduino_reset_invokes_hardware_serial_end", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-    RESET_FAKE(HardwareSerial_end);
-
-    // Action
-    noteserial.reset();
-
-    // Assert
-    CHECK(HardwareSerial_end_fake.call_count);
-}
-
-TEST_CASE("test_noteserial_arduino_reset_invokes_hardware_serial_begin", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-    RESET_FAKE(HardwareSerial_begin);
-
-    // Action
-    noteserial.reset();
-
-    // Assert
-    CHECK(HardwareSerial_begin_fake.call_count);
-}
-
-TEST_CASE("test_noteserial_arduino_reset_invokes_hardware_serial_begin_with_the_baud_parameter_that_was_originally_supplied_to_the_constructor", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    const size_t EXPECTED_BAUD_RATE = 9600;
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, EXPECTED_BAUD_RATE);
-
-    RESET_FAKE(HardwareSerial_begin);
-
-    // Action
-    noteserial.reset();
-
-    // Assert
-    CHECK(EXPECTED_BAUD_RATE == HardwareSerial_begin_fake.arg0_val);
-}
-
-TEST_CASE("test_noteserial_arduino_reset_always_returns_true", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-
-    // Action
-    const bool ACTUAL_RESULT = noteserial.reset();
-
-    // Assert
-    CHECK(ACTUAL_RESULT);
-}
 
 TEST_CASE("test_noteserial_arduino_transmit_returns_the_number_of_bytes_the_serial_port_accepted_when_the_port_accepts_fewer_than_requested", "[NoteSerial_Arduino][transmit]")
 {
