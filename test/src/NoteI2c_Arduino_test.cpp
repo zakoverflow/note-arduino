@@ -1,10 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "arduino_fakes.hpp"
 #include "NoteI2c_Arduino.hpp"
 
 #include <cassert>
 #include <cstring>
+#include <string>
 
 
 // Called first in every TEST_CASE: RESET_FAKE on every FFF fake, then
@@ -12,6 +14,18 @@
 static void resetFakes(void)
 {
   resetArduinoFakes();
+}
+
+// Decision Q-D5 option A: a message "prefix" is the text before the first colon.
+// The words after the colon are not locked. The {io}{i2c} tags stay present.
+static void checkErrorPrefixAndTags(const char * actual, const char * expected_prefix)
+{
+  REQUIRE(nullptr != actual);
+  const std::string err(actual);
+  const size_t colon = err.find(':');
+  REQUIRE(std::string::npos != colon);
+  CHECK(expected_prefix == err.substr(0, colon));
+  CHECK_THAT(err, Catch::Matchers::EndsWith("{io}{i2c}"));
 }
 
 TEST_CASE("test_make_note_i2c_instantiates_notei2c_object", "[NoteI2c_Arduino]")
@@ -481,13 +495,17 @@ TEST_CASE("test_notei2c_arduino_receive_returns_nullptr_on_success", "[NoteI2c_A
   CHECK(ACTUAL_RESULT == nullptr);
 }
 
-TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_i2c_transmission_failure_1", "[NoteI2c_Arduino]")
+// SPEC-NOTE: Decision Q-D5 option A. The receive() returns a non-null error.
+// SPEC-NOTE: A message prefix is the text before the first colon (here "i2c|rx").
+// SPEC-NOTE: The error ends with the tags {io}{i2c}. The words between the prefix
+// SPEC-NOTE: and the tags are not specified.
+TEST_CASE("test_notei2c_arduino_receive_returns_error_with_prefix_and_tags_on_i2c_transmission_failure_1", "[NoteI2c_Arduino][receive]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   const uint8_t REQUEST_SIZE = 13;
-  const char * EXPECTED_RESULT = "i2c|rx: data too long to fit in transmit buffer {io}{i2c}";
+  const char * EXPECTED_PREFIX = "i2c|rx";
   uint8_t response_buffer[32];
   uint32_t bytes_remaining;
 
@@ -510,17 +528,16 @@ TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_i2c_transmissio
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
-TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_i2c_transmission_failure_2", "[NoteI2c_Arduino]")
+TEST_CASE("test_notei2c_arduino_receive_returns_error_with_prefix_and_tags_on_i2c_transmission_failure_2", "[NoteI2c_Arduino][receive]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   const uint8_t REQUEST_SIZE = 13;
-  const char * EXPECTED_RESULT = "i2c|rx: received NACK on transmit of address {io}{i2c}";
+  const char * EXPECTED_PREFIX = "i2c|rx";
   uint8_t response_buffer[32];
   uint32_t bytes_remaining;
 
@@ -543,17 +560,16 @@ TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_i2c_transmissio
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
-TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_i2c_transmission_failure_3", "[NoteI2c_Arduino]")
+TEST_CASE("test_notei2c_arduino_receive_returns_error_with_prefix_and_tags_on_i2c_transmission_failure_3", "[NoteI2c_Arduino][receive]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   const uint8_t REQUEST_SIZE = 13;
-  const char * EXPECTED_RESULT = "i2c|rx: received NACK on transmit of data {io}{i2c}";
+  const char * EXPECTED_PREFIX = "i2c|rx";
   uint8_t response_buffer[32];
   uint32_t bytes_remaining;
 
@@ -576,17 +592,16 @@ TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_i2c_transmissio
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
-TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_i2c_transmission_failure_4", "[NoteI2c_Arduino]")
+TEST_CASE("test_notei2c_arduino_receive_returns_error_with_prefix_and_tags_on_i2c_transmission_failure_4", "[NoteI2c_Arduino][receive]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   const uint8_t REQUEST_SIZE = 13;
-  const char * EXPECTED_RESULT = "i2c|rx: unknown error on TwoWire::endTransmission() {io}{i2c}";
+  const char * EXPECTED_PREFIX = "i2c|rx";
   uint8_t response_buffer[32];
   uint32_t bytes_remaining;
 
@@ -609,17 +624,16 @@ TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_i2c_transmissio
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
-TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_i2c_transmission_failure_5", "[NoteI2c_Arduino]")
+TEST_CASE("test_notei2c_arduino_receive_returns_error_with_prefix_and_tags_on_i2c_transmission_failure_5", "[NoteI2c_Arduino][receive]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   const uint8_t REQUEST_SIZE = 13;
-  const char * EXPECTED_RESULT = "i2c|rx: timeout {io}{i2c}";
+  const char * EXPECTED_PREFIX = "i2c|rx";
   uint8_t response_buffer[32];
   uint32_t bytes_remaining;
 
@@ -642,17 +656,16 @@ TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_i2c_transmissio
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
-TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_unexpected_i2c_transmission_failure", "[NoteI2c_Arduino]")
+TEST_CASE("test_notei2c_arduino_receive_returns_error_with_prefix_and_tags_on_unexpected_i2c_transmission_failure", "[NoteI2c_Arduino][receive]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   const uint8_t REQUEST_SIZE = 13;
-  const char * EXPECTED_RESULT = "i2c|rx: unknown error encountered during I2C transmission {io}{i2c}";
+  const char * EXPECTED_PREFIX = "i2c|rx";
   uint8_t response_buffer[32];
   uint32_t bytes_remaining;
 
@@ -675,17 +688,16 @@ TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_unexpected_i2c_
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
-TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_i2c_protocol_failure_to_respond", "[NoteI2c_Arduino]")
+TEST_CASE("test_notei2c_arduino_receive_returns_error_with_prefix_and_tags_on_i2c_protocol_failure_to_respond", "[NoteI2c_Arduino][receive]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   const uint8_t REQUEST_SIZE = 13;
-  const char * EXPECTED_RESULT = "i2c|rx: no response to read request {io}{i2c}";
+  const char * EXPECTED_PREFIX = "i2c|rx";
   uint8_t response_buffer[32];
   uint32_t bytes_remaining;
 
@@ -706,17 +718,16 @@ TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_i2c_protocol_fa
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
-TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_i2c_protocol_unexpected_raw_byte_count", "[NoteI2c_Arduino]")
+TEST_CASE("test_notei2c_arduino_receive_returns_error_with_prefix_and_tags_on_i2c_protocol_unexpected_raw_byte_count", "[NoteI2c_Arduino][receive]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   const uint8_t REQUEST_SIZE = 13;
-  const char * EXPECTED_RESULT = "i2c|rx: unexpected raw byte count {io}{i2c}";
+  const char * EXPECTED_PREFIX = "i2c|rx";
   uint8_t response_buffer[32];
   uint32_t bytes_remaining;
 
@@ -738,18 +749,17 @@ TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_i2c_protocol_un
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
-TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_serial_over_i2c_protocol_unexpected_available_byte_count", "[NoteI2c_Arduino]")
+TEST_CASE("test_notei2c_arduino_receive_returns_error_with_prefix_and_tags_on_serial_over_i2c_protocol_unexpected_available_byte_count", "[NoteI2c_Arduino][receive]")
 {
   resetFakes();
   // Arrange
   const uint8_t AVAILABLE_SIZE = ((NoteI2c_Arduino::REQUEST_MAX_SIZE - NoteI2c_Arduino::REQUEST_HEADER_SIZE) + 1);
   const uint16_t EXPECTED_ADDRESS = 0x17;
   const uint8_t REQUEST_SIZE = 13;
-  const char * EXPECTED_RESULT = "serial-over-i2c|rx: available byte count greater than max allowed {io}{i2c}";
+  const char * EXPECTED_PREFIX = "serial-over-i2c|rx";
   uint8_t response_buffer[32];
   uint32_t bytes_remaining;
 
@@ -771,17 +781,16 @@ TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_serial_over_i2c
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
-TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_serial_over_i2c_protocol_unexpected_protocol_byte_count", "[NoteI2c_Arduino]")
+TEST_CASE("test_notei2c_arduino_receive_returns_error_with_prefix_and_tags_on_serial_over_i2c_protocol_unexpected_protocol_byte_count", "[NoteI2c_Arduino][receive]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   const uint8_t REQUEST_SIZE = 13;
-  const char * EXPECTED_RESULT = "serial-over-i2c|rx: unexpected protocol byte count {io}{i2c}";
+  const char * EXPECTED_PREFIX = "serial-over-i2c|rx";
   uint8_t response_buffer[32];
   uint32_t bytes_remaining;
 
@@ -803,8 +812,7 @@ TEST_CASE("test_notei2c_arduino_receive_returns_error_message_on_serial_over_i2c
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
 TEST_CASE("test_notei2c_arduino_reset_invokes_begin_method_on_constructor_twowire_parameter", "[NoteI2c_Arduino]")
@@ -934,14 +942,18 @@ TEST_CASE("test_notei2c_arduino_transmit_returns_nullptr_on_success", "[NoteI2c_
   CHECK(ACTUAL_RESULT == nullptr);
 }
 
-TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_i2c_transmission_failure1", "[NoteI2c_Arduino]")
+// SPEC-NOTE: Decision Q-D5 option A. The transmit() returns a non-null error.
+// SPEC-NOTE: A message prefix is the text before the first colon (here "i2c|tx").
+// SPEC-NOTE: The error ends with the tags {io}{i2c}. The words between the prefix
+// SPEC-NOTE: and the tags are not specified.
+TEST_CASE("test_notei2c_arduino_transmit_returns_error_with_prefix_and_tags_on_i2c_transmission_failure1", "[NoteI2c_Arduino][transmit]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   uint8_t write_buffer[17] = {'H','e','l','l','o',',',' ','N','o','t','e','c','a','r','d','!','\0'};
   const uint8_t REQUEST_SIZE = sizeof(write_buffer);
-  const char * EXPECTED_RESULT = "i2c|tx: data too long to fit in transmit buffer {io}{i2c}";
+  const char * EXPECTED_PREFIX = "i2c|tx";
 
   RESET_FAKE(TwoWire_beginTransmission);
   RESET_FAKE(TwoWire_write_byte);
@@ -958,18 +970,17 @@ TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_i2c_transmissi
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
-TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_i2c_transmission_failure2", "[NoteI2c_Arduino]")
+TEST_CASE("test_notei2c_arduino_transmit_returns_error_with_prefix_and_tags_on_i2c_transmission_failure2", "[NoteI2c_Arduino][transmit]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   uint8_t write_buffer[17] = {'H','e','l','l','o',',',' ','N','o','t','e','c','a','r','d','!','\0'};
   const uint8_t REQUEST_SIZE = sizeof(write_buffer);
-  const char * EXPECTED_RESULT = "i2c|tx: received NACK on transmit of address {io}{i2c}";
+  const char * EXPECTED_PREFIX = "i2c|tx";
 
   RESET_FAKE(TwoWire_beginTransmission);
   RESET_FAKE(TwoWire_write_byte);
@@ -986,18 +997,17 @@ TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_i2c_transmissi
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
-TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_i2c_transmission_failure3", "[NoteI2c_Arduino]")
+TEST_CASE("test_notei2c_arduino_transmit_returns_error_with_prefix_and_tags_on_i2c_transmission_failure3", "[NoteI2c_Arduino][transmit]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   uint8_t write_buffer[17] = {'H','e','l','l','o',',',' ','N','o','t','e','c','a','r','d','!','\0'};
   const uint8_t REQUEST_SIZE = sizeof(write_buffer);
-  const char * EXPECTED_RESULT = "i2c|tx: received NACK on transmit of data {io}{i2c}";
+  const char * EXPECTED_PREFIX = "i2c|tx";
 
   RESET_FAKE(TwoWire_beginTransmission);
   RESET_FAKE(TwoWire_write_byte);
@@ -1014,18 +1024,17 @@ TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_i2c_transmissi
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
-TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_i2c_transmission_failure4", "[NoteI2c_Arduino]")
+TEST_CASE("test_notei2c_arduino_transmit_returns_error_with_prefix_and_tags_on_i2c_transmission_failure4", "[NoteI2c_Arduino][transmit]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   uint8_t write_buffer[17] = {'H','e','l','l','o',',',' ','N','o','t','e','c','a','r','d','!','\0'};
   const uint8_t REQUEST_SIZE = sizeof(write_buffer);
-  const char * EXPECTED_RESULT = "i2c|tx: unknown error on TwoWire::endTransmission() {io}{i2c}";
+  const char * EXPECTED_PREFIX = "i2c|tx";
 
   RESET_FAKE(TwoWire_beginTransmission);
   RESET_FAKE(TwoWire_write_byte);
@@ -1042,18 +1051,17 @@ TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_i2c_transmissi
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
-TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_i2c_transmission_failure5", "[NoteI2c_Arduino]")
+TEST_CASE("test_notei2c_arduino_transmit_returns_error_with_prefix_and_tags_on_i2c_transmission_failure5", "[NoteI2c_Arduino][transmit]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   uint8_t write_buffer[17] = {'H','e','l','l','o',',',' ','N','o','t','e','c','a','r','d','!','\0'};
   const uint8_t REQUEST_SIZE = sizeof(write_buffer);
-  const char * EXPECTED_RESULT = "i2c|tx: timeout {io}{i2c}";
+  const char * EXPECTED_PREFIX = "i2c|tx";
 
   RESET_FAKE(TwoWire_beginTransmission);
   RESET_FAKE(TwoWire_write_byte);
@@ -1070,18 +1078,17 @@ TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_i2c_transmissi
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
 
-TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_unexpected_i2c_transmission_failure", "[NoteI2c_Arduino]")
+TEST_CASE("test_notei2c_arduino_transmit_returns_error_with_prefix_and_tags_on_unexpected_i2c_transmission_failure", "[NoteI2c_Arduino][transmit]")
 {
   resetFakes();
   // Arrange
   const uint16_t EXPECTED_ADDRESS = 0x17;
   uint8_t write_buffer[17] = {'H','e','l','l','o',',',' ','N','o','t','e','c','a','r','d','!','\0'};
   const uint8_t REQUEST_SIZE = sizeof(write_buffer);
-  const char * EXPECTED_RESULT = "i2c|tx: unknown error encountered during I2C transmission {io}{i2c}";
+  const char * EXPECTED_PREFIX = "i2c|tx";
 
   RESET_FAKE(TwoWire_beginTransmission);
   RESET_FAKE(TwoWire_write_byte);
@@ -1098,6 +1105,5 @@ TEST_CASE("test_notei2c_arduino_transmit_returns_error_message_on_unexpected_i2c
   );
 
   // Assert
-  CHECK(ACTUAL_RESULT);
-  CHECK(!memcmp(ACTUAL_RESULT, EXPECTED_RESULT, strlen(EXPECTED_RESULT)));
+  checkErrorPrefixAndTags(ACTUAL_RESULT, EXPECTED_PREFIX);
 }
