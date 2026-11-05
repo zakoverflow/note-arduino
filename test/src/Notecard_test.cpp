@@ -22,6 +22,105 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+
+namespace {
+
+// Stateful fakes for Notecard static I2C thunks (X5 static-i2c-callbacks).
+// Unique names for merge with #22–#28. Captures NoteSetFnI2CDefault hooks and
+// NoteI2c_* effects so noteI2cReceive/Reset/Transmit outcomes are observable.
+
+struct FakeNoteCStaticI2cBusHooks {
+    i2cResetFn reset;
+    i2cTransmitFn transmit;
+    i2cReceiveFn receive;
+};
+FakeNoteCStaticI2cBusHooks fake_note_c_static_i2c_hooks;
+
+struct FakeNoteCStaticI2cEffects {
+    int receive_calls;
+    uint16_t receive_addr;
+    uint8_t * receive_buf;
+    uint16_t receive_size;
+    uint32_t * receive_available;
+    const char * receive_return;
+    int reset_calls;
+    uint16_t reset_addr;
+    bool reset_return;
+    int transmit_calls;
+    uint16_t transmit_addr;
+    uint8_t * transmit_buf;
+    uint16_t transmit_size;
+    const char * transmit_return;
+};
+FakeNoteCStaticI2cEffects fake_note_c_static_i2c_effects;
+
+void fakeNoteSetFnI2CDefaultStaticI2c(uint32_t, uint32_t, i2cResetFn reset, i2cTransmitFn transmit, i2cReceiveFn receive)
+{
+    fake_note_c_static_i2c_hooks.reset = reset;
+    fake_note_c_static_i2c_hooks.transmit = transmit;
+    fake_note_c_static_i2c_hooks.receive = receive;
+}
+
+const char * fakeNoteI2cReceiveStaticI2c(uint16_t address, uint8_t * buffer, uint16_t size, uint32_t * available)
+{
+    fake_note_c_static_i2c_effects.receive_calls += 1;
+    fake_note_c_static_i2c_effects.receive_addr = address;
+    fake_note_c_static_i2c_effects.receive_buf = buffer;
+    fake_note_c_static_i2c_effects.receive_size = size;
+    fake_note_c_static_i2c_effects.receive_available = available;
+    return fake_note_c_static_i2c_effects.receive_return;
+}
+
+bool fakeNoteI2cResetStaticI2c(uint16_t address)
+{
+    fake_note_c_static_i2c_effects.reset_calls += 1;
+    fake_note_c_static_i2c_effects.reset_addr = address;
+    return fake_note_c_static_i2c_effects.reset_return;
+}
+
+const char * fakeNoteI2cTransmitStaticI2c(uint16_t address, uint8_t * buffer, uint16_t size)
+{
+    fake_note_c_static_i2c_effects.transmit_calls += 1;
+    fake_note_c_static_i2c_effects.transmit_addr = address;
+    fake_note_c_static_i2c_effects.transmit_buf = buffer;
+    fake_note_c_static_i2c_effects.transmit_size = size;
+    return fake_note_c_static_i2c_effects.transmit_return;
+}
+
+// Call after resetFakes(). Captures NoteSetFnI2CDefault hooks from begin(&i2c).
+void useFakeNoteCStaticI2cBusHooks(void)
+{
+    fake_note_c_static_i2c_hooks.reset = nullptr;
+    fake_note_c_static_i2c_hooks.transmit = nullptr;
+    fake_note_c_static_i2c_hooks.receive = nullptr;
+    NoteSetFnI2CDefault_fake.custom_fake = fakeNoteSetFnI2CDefaultStaticI2c;
+}
+
+// Call after begin (and typically after RESET of NoteI2c_*). Captures NoteI2c_*
+// so static thunks can be shown to forward or not.
+void useFakeNoteI2cStaticI2c(void)
+{
+    fake_note_c_static_i2c_effects.receive_calls = 0;
+    fake_note_c_static_i2c_effects.receive_addr = 0;
+    fake_note_c_static_i2c_effects.receive_buf = nullptr;
+    fake_note_c_static_i2c_effects.receive_size = 0;
+    fake_note_c_static_i2c_effects.receive_available = nullptr;
+    fake_note_c_static_i2c_effects.receive_return = nullptr;
+    fake_note_c_static_i2c_effects.reset_calls = 0;
+    fake_note_c_static_i2c_effects.reset_addr = 0;
+    fake_note_c_static_i2c_effects.reset_return = false;
+    fake_note_c_static_i2c_effects.transmit_calls = 0;
+    fake_note_c_static_i2c_effects.transmit_addr = 0;
+    fake_note_c_static_i2c_effects.transmit_buf = nullptr;
+    fake_note_c_static_i2c_effects.transmit_size = 0;
+    fake_note_c_static_i2c_effects.transmit_return = nullptr;
+    NoteI2c_receive_fake.custom_fake = fakeNoteI2cReceiveStaticI2c;
+    NoteI2c_reset_fake.custom_fake = fakeNoteI2cResetStaticI2c;
+    NoteI2c_transmit_fake.custom_fake = fakeNoteI2cTransmitStaticI2c;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -1962,6 +2061,422 @@ TEST_CASE("test_notecard_newCommand_does_not_modify_note_c_result_value_before_r
 
   free(NoteNewCommand_fake.return_val);
   free(EXPECTED_JSON);
+}
+
+
+// X5 static-i2c-callbacks outcomes: noteI2cReceive/Reset/Transmit forward to
+// NoteI2c_* when set, and return fixed errors/false without calling when null.
+// Tags: [Notecard][static-i2c-callbacks].
+TEST_CASE("test_static_callback_note_i2c_receive_forwards_to_the_i2c_interface_when_i2c_is_set", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.receive);
+  useFakeNoteI2cStaticI2c();
+  const uint16_t ADDR = 0x17;
+  const uint16_t SIZE = 13;
+  uint8_t buf[32];
+  uint32_t available = 0;
+
+  // Action
+  fake_note_c_static_i2c_hooks.receive(ADDR, buf, SIZE, &available);
+
+  // Assert
+  CHECK(1 == fake_note_c_static_i2c_effects.receive_calls);
+}
+
+TEST_CASE("test_static_callback_note_i2c_receive_forwards_the_device_address_when_i2c_is_set", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.receive);
+  useFakeNoteI2cStaticI2c();
+  const uint16_t ADDR = 0x1B;
+  uint8_t buf[32];
+  uint32_t available = 0;
+
+  // Action
+  fake_note_c_static_i2c_hooks.receive(ADDR, buf, 13, &available);
+
+  // Assert
+  CHECK(ADDR == fake_note_c_static_i2c_effects.receive_addr);
+}
+
+TEST_CASE("test_static_callback_note_i2c_receive_forwards_the_buffer_pointer_when_i2c_is_set", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.receive);
+  useFakeNoteI2cStaticI2c();
+  uint8_t buf[32];
+  uint32_t available = 0;
+
+  // Action
+  fake_note_c_static_i2c_hooks.receive(0x1B, buf, 13, &available);
+
+  // Assert
+  CHECK(buf == fake_note_c_static_i2c_effects.receive_buf);
+}
+
+TEST_CASE("test_static_callback_note_i2c_receive_forwards_the_size_when_i2c_is_set", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.receive);
+  useFakeNoteI2cStaticI2c();
+  const uint16_t SIZE = 13;
+  uint8_t buf[32];
+  uint32_t available = 0;
+
+  // Action
+  fake_note_c_static_i2c_hooks.receive(0x1B, buf, SIZE, &available);
+
+  // Assert
+  CHECK(SIZE == fake_note_c_static_i2c_effects.receive_size);
+}
+
+TEST_CASE("test_static_callback_note_i2c_receive_forwards_the_available_pointer_when_i2c_is_set", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.receive);
+  useFakeNoteI2cStaticI2c();
+  uint8_t buf[32];
+  uint32_t available = 0;
+
+  // Action
+  fake_note_c_static_i2c_hooks.receive(0x1B, buf, 13, &available);
+
+  // Assert
+  CHECK(&available == fake_note_c_static_i2c_effects.receive_available);
+}
+
+TEST_CASE("test_static_callback_note_i2c_receive_returns_the_i2c_interface_result_when_i2c_is_set", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.receive);
+  useFakeNoteI2cStaticI2c();
+  static const char * const ERR = "i2c: fake test error!";
+  fake_note_c_static_i2c_effects.receive_return = ERR;
+  uint8_t buf[32];
+  uint32_t available = 0;
+
+  // Action
+  const char * result = fake_note_c_static_i2c_hooks.receive(0x1B, buf, 13, &available);
+
+  // Assert
+  CHECK(ERR == result);
+}
+
+TEST_CASE("test_static_callback_note_i2c_receive_does_not_call_the_i2c_interface_when_i2c_is_null", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.receive);
+  i2cReceiveFn receive = fake_note_c_static_i2c_hooks.receive;
+  notecard.begin(static_cast<NoteI2c *>(nullptr));
+  useFakeNoteI2cStaticI2c();
+  uint8_t buf[32];
+  uint32_t available = 0;
+
+  // Action
+  receive(0x1B, buf, 13, &available);
+
+  // Assert
+  CHECK(0 == fake_note_c_static_i2c_effects.receive_calls);
+}
+
+TEST_CASE("test_static_callback_note_i2c_receive_returns_begin_required_error_when_i2c_is_null", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.receive);
+  i2cReceiveFn receive = fake_note_c_static_i2c_hooks.receive;
+  notecard.begin(static_cast<NoteI2c *>(nullptr));
+  useFakeNoteI2cStaticI2c();
+  static const char * const EXPECTED = "i2c: A call to Notecard::begin() is required. {io}";
+  uint8_t buf[32];
+  uint32_t available = 0;
+
+  // Action
+  const char * result = receive(0x1B, buf, 13, &available);
+
+  // Assert
+  CHECK(0 == strcmp(EXPECTED, result));
+}
+
+TEST_CASE("test_static_callback_note_i2c_reset_forwards_to_the_i2c_interface_when_i2c_is_set", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.reset);
+  useFakeNoteI2cStaticI2c();
+
+  // Action
+  fake_note_c_static_i2c_hooks.reset(0x17);
+
+  // Assert
+  CHECK(1 == fake_note_c_static_i2c_effects.reset_calls);
+}
+
+TEST_CASE("test_static_callback_note_i2c_reset_forwards_the_device_address_when_i2c_is_set", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.reset);
+  useFakeNoteI2cStaticI2c();
+  const uint16_t ADDR = 0x1B;
+
+  // Action
+  fake_note_c_static_i2c_hooks.reset(ADDR);
+
+  // Assert
+  CHECK(ADDR == fake_note_c_static_i2c_effects.reset_addr);
+}
+
+TEST_CASE("test_static_callback_note_i2c_reset_returns_the_i2c_interface_result_when_i2c_is_set", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.reset);
+  useFakeNoteI2cStaticI2c();
+  fake_note_c_static_i2c_effects.reset_return = true;
+
+  // Action
+  const bool result = fake_note_c_static_i2c_hooks.reset(0x1B);
+
+  // Assert
+  CHECK(true == result);
+  CHECK(1 == fake_note_c_static_i2c_effects.reset_calls);
+}
+
+TEST_CASE("test_static_callback_note_i2c_reset_does_not_call_the_i2c_interface_when_i2c_is_null", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.reset);
+  i2cResetFn reset = fake_note_c_static_i2c_hooks.reset;
+  notecard.begin(static_cast<NoteI2c *>(nullptr));
+  useFakeNoteI2cStaticI2c();
+
+  // Action
+  reset(0x1B);
+
+  // Assert
+  CHECK(0 == fake_note_c_static_i2c_effects.reset_calls);
+}
+
+TEST_CASE("test_static_callback_note_i2c_reset_returns_false_when_i2c_is_null", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.reset);
+  i2cResetFn reset = fake_note_c_static_i2c_hooks.reset;
+  notecard.begin(static_cast<NoteI2c *>(nullptr));
+  useFakeNoteI2cStaticI2c();
+  fake_note_c_static_i2c_effects.reset_return = true;
+
+  // Action
+  const bool result = reset(0x1B);
+
+  // Assert
+  CHECK(false == result);
+  CHECK(0 == fake_note_c_static_i2c_effects.reset_calls);
+}
+
+TEST_CASE("test_static_callback_note_i2c_transmit_forwards_to_the_i2c_interface_when_i2c_is_set", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.transmit);
+  useFakeNoteI2cStaticI2c();
+  uint8_t buf[4] = {1, 2, 3, 4};
+
+  // Action
+  fake_note_c_static_i2c_hooks.transmit(0x17, buf, 4);
+
+  // Assert
+  CHECK(1 == fake_note_c_static_i2c_effects.transmit_calls);
+}
+
+TEST_CASE("test_static_callback_note_i2c_transmit_forwards_the_device_address_when_i2c_is_set", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.transmit);
+  useFakeNoteI2cStaticI2c();
+  const uint16_t ADDR = 0x1B;
+  uint8_t buf[4];
+
+  // Action
+  fake_note_c_static_i2c_hooks.transmit(ADDR, buf, 4);
+
+  // Assert
+  CHECK(ADDR == fake_note_c_static_i2c_effects.transmit_addr);
+}
+
+TEST_CASE("test_static_callback_note_i2c_transmit_forwards_the_buffer_pointer_when_i2c_is_set", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.transmit);
+  useFakeNoteI2cStaticI2c();
+  uint8_t buf[4];
+
+  // Action
+  fake_note_c_static_i2c_hooks.transmit(0x1B, buf, 4);
+
+  // Assert
+  CHECK(buf == fake_note_c_static_i2c_effects.transmit_buf);
+}
+
+TEST_CASE("test_static_callback_note_i2c_transmit_forwards_the_size_when_i2c_is_set", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.transmit);
+  useFakeNoteI2cStaticI2c();
+  const uint16_t SIZE = 4;
+  uint8_t buf[4];
+
+  // Action
+  fake_note_c_static_i2c_hooks.transmit(0x1B, buf, SIZE);
+
+  // Assert
+  CHECK(SIZE == fake_note_c_static_i2c_effects.transmit_size);
+}
+
+TEST_CASE("test_static_callback_note_i2c_transmit_returns_the_i2c_interface_result_when_i2c_is_set", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.transmit);
+  useFakeNoteI2cStaticI2c();
+  static const char * const ERR = "i2c: fake tx error!";
+  fake_note_c_static_i2c_effects.transmit_return = ERR;
+  uint8_t buf[4];
+
+  // Action
+  const char * result = fake_note_c_static_i2c_hooks.transmit(0x1B, buf, 4);
+
+  // Assert
+  CHECK(ERR == result);
+}
+
+TEST_CASE("test_static_callback_note_i2c_transmit_does_not_call_the_i2c_interface_when_i2c_is_null", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.transmit);
+  i2cTransmitFn transmit = fake_note_c_static_i2c_hooks.transmit;
+  notecard.begin(static_cast<NoteI2c *>(nullptr));
+  useFakeNoteI2cStaticI2c();
+  uint8_t buf[4];
+
+  // Action
+  transmit(0x1B, buf, 4);
+
+  // Assert
+  CHECK(0 == fake_note_c_static_i2c_effects.transmit_calls);
+}
+
+TEST_CASE("test_static_callback_note_i2c_transmit_returns_begin_required_error_when_i2c_is_null", "[Notecard][static-i2c-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticI2cBusHooks();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  REQUIRE(nullptr != fake_note_c_static_i2c_hooks.transmit);
+  i2cTransmitFn transmit = fake_note_c_static_i2c_hooks.transmit;
+  notecard.begin(static_cast<NoteI2c *>(nullptr));
+  useFakeNoteI2cStaticI2c();
+  static const char * const EXPECTED = "i2c: A call to Notecard::begin() is required. {io}";
+  uint8_t buf[4];
+
+  // Action
+  const char * result = transmit(0x1B, buf, 4);
+
+  // Assert
+  CHECK(0 == strcmp(EXPECTED, result));
 }
 
 TEST_CASE("test_static_callback_note_i2c_receive_invokes_notei2c_receive", "[Notecard]")
