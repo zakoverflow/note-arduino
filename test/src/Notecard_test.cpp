@@ -22,6 +22,103 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+
+namespace {
+
+// Stateful fakes for Notecard static serial thunks (X5 static-serial-callbacks).
+// Unique names for merge with #22–#29. Captures NoteSetFnSerialDefault hooks and
+// NoteSerial_* effects so noteSerialAvailable/Receive/Reset/Transmit outcomes
+// are observable.
+
+struct FakeNoteCStaticSerialBusHooks {
+    serialResetFn reset;
+    serialTransmitFn transmit;
+    serialAvailableFn available;
+    serialReceiveFn receive;
+};
+FakeNoteCStaticSerialBusHooks fake_note_c_static_serial_hooks;
+
+struct FakeNoteCStaticSerialEffects {
+    int available_calls;
+    size_t available_return;
+    int receive_calls;
+    char receive_return;
+    int reset_calls;
+    bool reset_return;
+    int transmit_calls;
+    uint8_t * transmit_text;
+    size_t transmit_len;
+    bool transmit_flush;
+};
+FakeNoteCStaticSerialEffects fake_note_c_static_serial_effects;
+
+void fakeNoteSetFnSerialDefaultStaticSerial(serialResetFn reset, serialTransmitFn transmit, serialAvailableFn available, serialReceiveFn receive)
+{
+    fake_note_c_static_serial_hooks.reset = reset;
+    fake_note_c_static_serial_hooks.transmit = transmit;
+    fake_note_c_static_serial_hooks.available = available;
+    fake_note_c_static_serial_hooks.receive = receive;
+}
+
+size_t fakeNoteSerialAvailableStaticSerial(void)
+{
+    fake_note_c_static_serial_effects.available_calls += 1;
+    return fake_note_c_static_serial_effects.available_return;
+}
+
+char fakeNoteSerialReceiveStaticSerial(void)
+{
+    fake_note_c_static_serial_effects.receive_calls += 1;
+    return fake_note_c_static_serial_effects.receive_return;
+}
+
+bool fakeNoteSerialResetStaticSerial(void)
+{
+    fake_note_c_static_serial_effects.reset_calls += 1;
+    return fake_note_c_static_serial_effects.reset_return;
+}
+
+size_t fakeNoteSerialTransmitStaticSerial(uint8_t * text, size_t len, bool flush)
+{
+    fake_note_c_static_serial_effects.transmit_calls += 1;
+    fake_note_c_static_serial_effects.transmit_text = text;
+    fake_note_c_static_serial_effects.transmit_len = len;
+    fake_note_c_static_serial_effects.transmit_flush = flush;
+    return len;
+}
+
+// Call after resetFakes(). Captures NoteSetFnSerialDefault hooks from begin(&serial).
+void useFakeNoteCStaticSerialBusHooks(void)
+{
+    fake_note_c_static_serial_hooks.reset = nullptr;
+    fake_note_c_static_serial_hooks.transmit = nullptr;
+    fake_note_c_static_serial_hooks.available = nullptr;
+    fake_note_c_static_serial_hooks.receive = nullptr;
+    NoteSetFnSerialDefault_fake.custom_fake = fakeNoteSetFnSerialDefaultStaticSerial;
+}
+
+// Call after begin (and typically after RESET of NoteSerial_*). Captures
+// NoteSerial_* so static thunks can be shown to forward or not.
+void useFakeNoteSerialStaticSerial(void)
+{
+    fake_note_c_static_serial_effects.available_calls = 0;
+    fake_note_c_static_serial_effects.available_return = 0;
+    fake_note_c_static_serial_effects.receive_calls = 0;
+    fake_note_c_static_serial_effects.receive_return = '\0';
+    fake_note_c_static_serial_effects.reset_calls = 0;
+    fake_note_c_static_serial_effects.reset_return = false;
+    fake_note_c_static_serial_effects.transmit_calls = 0;
+    fake_note_c_static_serial_effects.transmit_text = nullptr;
+    fake_note_c_static_serial_effects.transmit_len = 0;
+    fake_note_c_static_serial_effects.transmit_flush = false;
+    NoteSerial_available_fake.custom_fake = fakeNoteSerialAvailableStaticSerial;
+    NoteSerial_receive_fake.custom_fake = fakeNoteSerialReceiveStaticSerial;
+    NoteSerial_reset_fake.custom_fake = fakeNoteSerialResetStaticSerial;
+    NoteSerial_transmit_fake.custom_fake = fakeNoteSerialTransmitStaticSerial;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -2665,6 +2762,348 @@ TEST_CASE("test_static_callback_note_log_print_returns_false_when_interface_has_
 
   CHECK(!ACTUAL_RESULT);
   CHECK(!NoteLog_print_fake.call_count);
+}
+
+
+// X5 static-serial-callbacks outcomes: noteSerialAvailable/Receive/Reset/Transmit
+// forward to NoteSerial_* when set, and return false/'\\0' without calling when null.
+// Tags: [Notecard][static-serial-callbacks].
+TEST_CASE("test_static_callback_note_serial_available_forwards_to_the_serial_interface_when_serial_is_set", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.available);
+  useFakeNoteSerialStaticSerial();
+
+  // Action
+  fake_note_c_static_serial_hooks.available();
+
+  // Assert
+  CHECK(1 == fake_note_c_static_serial_effects.available_calls);
+}
+
+TEST_CASE("test_static_callback_note_serial_available_returns_the_serial_interface_result_when_serial_is_set", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.available);
+  useFakeNoteSerialStaticSerial();
+  fake_note_c_static_serial_effects.available_return = 1;
+
+  // Action
+  const bool result = fake_note_c_static_serial_hooks.available();
+
+  // Assert
+  CHECK(true == result);
+  CHECK(1 == fake_note_c_static_serial_effects.available_calls);
+}
+
+TEST_CASE("test_static_callback_note_serial_available_does_not_call_the_serial_interface_when_serial_is_null", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.available);
+  serialAvailableFn available = fake_note_c_static_serial_hooks.available;
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+  useFakeNoteSerialStaticSerial();
+
+  // Action
+  available();
+
+  // Assert
+  CHECK(0 == fake_note_c_static_serial_effects.available_calls);
+}
+
+TEST_CASE("test_static_callback_note_serial_available_returns_false_when_serial_is_null", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.available);
+  serialAvailableFn available = fake_note_c_static_serial_hooks.available;
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+  useFakeNoteSerialStaticSerial();
+  fake_note_c_static_serial_effects.available_return = 1;
+
+  // Action
+  const bool result = available();
+
+  // Assert
+  CHECK(false == result);
+  CHECK(0 == fake_note_c_static_serial_effects.available_calls);
+}
+
+TEST_CASE("test_static_callback_note_serial_receive_forwards_to_the_serial_interface_when_serial_is_set", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.receive);
+  useFakeNoteSerialStaticSerial();
+
+  // Action
+  fake_note_c_static_serial_hooks.receive();
+
+  // Assert
+  CHECK(1 == fake_note_c_static_serial_effects.receive_calls);
+}
+
+TEST_CASE("test_static_callback_note_serial_receive_returns_the_serial_interface_result_when_serial_is_set", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.receive);
+  useFakeNoteSerialStaticSerial();
+  fake_note_c_static_serial_effects.receive_return = 'Z';
+
+  // Action
+  const char result = fake_note_c_static_serial_hooks.receive();
+
+  // Assert
+  CHECK('Z' == result);
+  CHECK(1 == fake_note_c_static_serial_effects.receive_calls);
+}
+
+TEST_CASE("test_static_callback_note_serial_receive_does_not_call_the_serial_interface_when_serial_is_null", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.receive);
+  serialReceiveFn receive = fake_note_c_static_serial_hooks.receive;
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+  useFakeNoteSerialStaticSerial();
+
+  // Action
+  receive();
+
+  // Assert
+  CHECK(0 == fake_note_c_static_serial_effects.receive_calls);
+}
+
+TEST_CASE("test_static_callback_note_serial_receive_returns_nul_when_serial_is_null", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.receive);
+  serialReceiveFn receive = fake_note_c_static_serial_hooks.receive;
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+  useFakeNoteSerialStaticSerial();
+  fake_note_c_static_serial_effects.receive_return = 'Z';
+
+  // Action
+  const char result = receive();
+
+  // Assert
+  CHECK('\0' == result);
+  CHECK(0 == fake_note_c_static_serial_effects.receive_calls);
+}
+
+TEST_CASE("test_static_callback_note_serial_reset_forwards_to_the_serial_interface_when_serial_is_set", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.reset);
+  useFakeNoteSerialStaticSerial();
+
+  // Action
+  fake_note_c_static_serial_hooks.reset();
+
+  // Assert
+  CHECK(1 == fake_note_c_static_serial_effects.reset_calls);
+}
+
+TEST_CASE("test_static_callback_note_serial_reset_returns_the_serial_interface_result_when_serial_is_set", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.reset);
+  useFakeNoteSerialStaticSerial();
+  fake_note_c_static_serial_effects.reset_return = true;
+
+  // Action
+  const bool result = fake_note_c_static_serial_hooks.reset();
+
+  // Assert
+  CHECK(true == result);
+  CHECK(1 == fake_note_c_static_serial_effects.reset_calls);
+}
+
+TEST_CASE("test_static_callback_note_serial_reset_does_not_call_the_serial_interface_when_serial_is_null", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.reset);
+  serialResetFn reset = fake_note_c_static_serial_hooks.reset;
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+  useFakeNoteSerialStaticSerial();
+
+  // Action
+  reset();
+
+  // Assert
+  CHECK(0 == fake_note_c_static_serial_effects.reset_calls);
+}
+
+TEST_CASE("test_static_callback_note_serial_reset_returns_false_when_serial_is_null", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.reset);
+  serialResetFn reset = fake_note_c_static_serial_hooks.reset;
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+  useFakeNoteSerialStaticSerial();
+  fake_note_c_static_serial_effects.reset_return = true;
+
+  // Action
+  const bool result = reset();
+
+  // Assert
+  CHECK(false == result);
+  CHECK(0 == fake_note_c_static_serial_effects.reset_calls);
+}
+
+TEST_CASE("test_static_callback_note_serial_transmit_forwards_to_the_serial_interface_when_serial_is_set", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.transmit);
+  useFakeNoteSerialStaticSerial();
+  uint8_t text[] = "Test passed!";
+
+  // Action
+  fake_note_c_static_serial_hooks.transmit(text, sizeof(text), true);
+
+  // Assert
+  CHECK(1 == fake_note_c_static_serial_effects.transmit_calls);
+}
+
+TEST_CASE("test_static_callback_note_serial_transmit_forwards_the_text_pointer_when_serial_is_set", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.transmit);
+  useFakeNoteSerialStaticSerial();
+  uint8_t text[] = "Test passed!";
+
+  // Action
+  fake_note_c_static_serial_hooks.transmit(text, sizeof(text), true);
+
+  // Assert
+  CHECK(text == fake_note_c_static_serial_effects.transmit_text);
+}
+
+TEST_CASE("test_static_callback_note_serial_transmit_forwards_the_length_when_serial_is_set", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.transmit);
+  useFakeNoteSerialStaticSerial();
+  uint8_t text[] = "Test passed!";
+  const size_t LEN = sizeof(text);
+
+  // Action
+  fake_note_c_static_serial_hooks.transmit(text, LEN, true);
+
+  // Assert
+  CHECK(LEN == fake_note_c_static_serial_effects.transmit_len);
+}
+
+TEST_CASE("test_static_callback_note_serial_transmit_forwards_the_flush_flag_when_serial_is_set", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.transmit);
+  useFakeNoteSerialStaticSerial();
+  uint8_t text[] = "Test passed!";
+
+  // Action
+  fake_note_c_static_serial_hooks.transmit(text, sizeof(text), true);
+
+  // Assert
+  CHECK(true == fake_note_c_static_serial_effects.transmit_flush);
+}
+
+TEST_CASE("test_static_callback_note_serial_transmit_does_not_call_the_serial_interface_when_serial_is_null", "[Notecard][static-serial-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticSerialBusHooks();
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  REQUIRE(nullptr != fake_note_c_static_serial_hooks.transmit);
+  serialTransmitFn transmit = fake_note_c_static_serial_hooks.transmit;
+  notecard.begin(static_cast<NoteSerial *>(nullptr));
+  useFakeNoteSerialStaticSerial();
+  uint8_t text[] = "Test passed!";
+
+  // Action
+  transmit(text, sizeof(text), true);
+
+  // Assert
+  CHECK(0 == fake_note_c_static_serial_effects.transmit_calls);
 }
 
 TEST_CASE("test_static_callback_note_serial_available_invokes_noteserial_available", "[Notecard]")
