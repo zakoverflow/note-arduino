@@ -22,6 +22,93 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+
+namespace {
+
+// Stateful fakes for Notecard static log/txn thunks (X5 static-log-txn-callbacks).
+// Unique names for merge with #22–#30. Captures NoteSetFnDebugOutput /
+// NoteSetFnTransaction hooks and NoteLog_*/NoteTxn_* effects.
+
+struct FakeNoteCStaticLogTxnHooks {
+    debugOutputFn log_print;
+    txnStartFn txn_start;
+    txnStopFn txn_stop;
+};
+FakeNoteCStaticLogTxnHooks fake_note_c_static_log_txn_hooks;
+
+struct FakeNoteCStaticLogTxnEffects {
+    int print_calls;
+    const char * print_message;
+    size_t print_return;
+    int start_calls;
+    uint32_t start_timeout_ms;
+    bool start_return;
+    int stop_calls;
+};
+FakeNoteCStaticLogTxnEffects fake_note_c_static_log_txn_effects;
+
+void fakeNoteSetFnDebugOutputStaticLogTxn(debugOutputFn fn)
+{
+    fake_note_c_static_log_txn_hooks.log_print = fn;
+}
+
+void fakeNoteSetFnTransactionStaticLogTxn(txnStartFn start, txnStopFn stop)
+{
+    fake_note_c_static_log_txn_hooks.txn_start = start;
+    fake_note_c_static_log_txn_hooks.txn_stop = stop;
+}
+
+size_t fakeNoteLogPrintStaticLogTxn(const char * message)
+{
+    fake_note_c_static_log_txn_effects.print_calls += 1;
+    fake_note_c_static_log_txn_effects.print_message = message;
+    return fake_note_c_static_log_txn_effects.print_return;
+}
+
+bool fakeNoteTxnStartStaticLogTxn(uint32_t timeout_ms)
+{
+    fake_note_c_static_log_txn_effects.start_calls += 1;
+    fake_note_c_static_log_txn_effects.start_timeout_ms = timeout_ms;
+    return fake_note_c_static_log_txn_effects.start_return;
+}
+
+void fakeNoteTxnStopStaticLogTxn(void)
+{
+    fake_note_c_static_log_txn_effects.stop_calls += 1;
+}
+
+// Call after resetFakes(). Captures NoteSetFnDebugOutput from setDebugOutputStream.
+void useFakeNoteCStaticLogTxnDebugHook(void)
+{
+    fake_note_c_static_log_txn_hooks.log_print = nullptr;
+    NoteSetFnDebugOutput_fake.custom_fake = fakeNoteSetFnDebugOutputStaticLogTxn;
+}
+
+// Call after resetFakes(). Captures NoteSetFnTransaction from setTransactionPins.
+void useFakeNoteCStaticLogTxnTransactionHooks(void)
+{
+    fake_note_c_static_log_txn_hooks.txn_start = nullptr;
+    fake_note_c_static_log_txn_hooks.txn_stop = nullptr;
+    NoteSetFnTransaction_fake.custom_fake = fakeNoteSetFnTransactionStaticLogTxn;
+}
+
+// Call after setDebugOutputStream/setTransactionPins. Captures NoteLog_*/NoteTxn_*.
+void useFakeNoteLogTxnStaticLogTxn(void)
+{
+    fake_note_c_static_log_txn_effects.print_calls = 0;
+    fake_note_c_static_log_txn_effects.print_message = nullptr;
+    fake_note_c_static_log_txn_effects.print_return = 0;
+    fake_note_c_static_log_txn_effects.start_calls = 0;
+    fake_note_c_static_log_txn_effects.start_timeout_ms = 0;
+    fake_note_c_static_log_txn_effects.start_return = false;
+    fake_note_c_static_log_txn_effects.stop_calls = 0;
+    NoteLog_print_fake.custom_fake = fakeNoteLogPrintStaticLogTxn;
+    NoteTxn_start_fake.custom_fake = fakeNoteTxnStartStaticLogTxn;
+    NoteTxn_stop_fake.custom_fake = fakeNoteTxnStopStaticLogTxn;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -2527,6 +2614,250 @@ TEST_CASE("test_static_callback_note_i2c_transmit_returns_error_message_when_int
   ///////////
 
   CHECK(!strcmp(ACTUAL_RESULT,EXPECTED_RESULT));
+}
+
+
+// X5 static-log-txn-callbacks outcomes: noteLogPrint / noteTransactionStart /
+// noteTransactionStop forward when set; fixed returns and no call when null.
+// Tags: [Notecard][static-log-txn-callbacks].
+TEST_CASE("test_static_callback_note_log_print_forwards_to_the_log_interface_when_log_is_set", "[Notecard][static-log-txn-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticLogTxnDebugHook();
+  Notecard notecard;
+  NoteLog_Fake fakeLog;
+  notecard.setDebugOutputStream(&fakeLog);
+  REQUIRE(nullptr != fake_note_c_static_log_txn_hooks.log_print);
+  useFakeNoteLogTxnStaticLogTxn();
+  const char message[] = "Test passed!";
+
+  // Action
+  fake_note_c_static_log_txn_hooks.log_print(message);
+
+  // Assert
+  CHECK(1 == fake_note_c_static_log_txn_effects.print_calls);
+}
+
+TEST_CASE("test_static_callback_note_log_print_forwards_the_message_when_log_is_set", "[Notecard][static-log-txn-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticLogTxnDebugHook();
+  Notecard notecard;
+  NoteLog_Fake fakeLog;
+  notecard.setDebugOutputStream(&fakeLog);
+  REQUIRE(nullptr != fake_note_c_static_log_txn_hooks.log_print);
+  useFakeNoteLogTxnStaticLogTxn();
+  const char message[] = "Test passed!";
+
+  // Action
+  fake_note_c_static_log_txn_hooks.log_print(message);
+
+  // Assert
+  CHECK(message == fake_note_c_static_log_txn_effects.print_message);
+}
+
+TEST_CASE("test_static_callback_note_log_print_returns_the_log_interface_result_when_log_is_set", "[Notecard][static-log-txn-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticLogTxnDebugHook();
+  Notecard notecard;
+  NoteLog_Fake fakeLog;
+  notecard.setDebugOutputStream(&fakeLog);
+  REQUIRE(nullptr != fake_note_c_static_log_txn_hooks.log_print);
+  useFakeNoteLogTxnStaticLogTxn();
+  const char message[] = "Test passed!";
+  fake_note_c_static_log_txn_effects.print_return = sizeof(message);
+
+  // Action
+  const size_t result = fake_note_c_static_log_txn_hooks.log_print(message);
+
+  // Assert
+  CHECK(sizeof(message) == result);
+  CHECK(1 == fake_note_c_static_log_txn_effects.print_calls);
+}
+
+TEST_CASE("test_static_callback_note_log_print_does_not_call_the_log_interface_when_log_is_null", "[Notecard][static-log-txn-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticLogTxnDebugHook();
+  Notecard notecard;
+  NoteLog_Fake fakeLog;
+  notecard.setDebugOutputStream(&fakeLog);
+  REQUIRE(nullptr != fake_note_c_static_log_txn_hooks.log_print);
+  debugOutputFn log_print = fake_note_c_static_log_txn_hooks.log_print;
+  notecard.setDebugOutputStream(nullptr);
+  useFakeNoteLogTxnStaticLogTxn();
+  const char message[] = "Test passed!";
+
+  // Action
+  log_print(message);
+
+  // Assert
+  CHECK(0 == fake_note_c_static_log_txn_effects.print_calls);
+}
+
+TEST_CASE("test_static_callback_note_log_print_returns_zero_when_log_is_null", "[Notecard][static-log-txn-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticLogTxnDebugHook();
+  Notecard notecard;
+  NoteLog_Fake fakeLog;
+  notecard.setDebugOutputStream(&fakeLog);
+  REQUIRE(nullptr != fake_note_c_static_log_txn_hooks.log_print);
+  debugOutputFn log_print = fake_note_c_static_log_txn_hooks.log_print;
+  notecard.setDebugOutputStream(nullptr);
+  useFakeNoteLogTxnStaticLogTxn();
+  const char message[] = "Test passed!";
+  fake_note_c_static_log_txn_effects.print_return = sizeof(message);
+
+  // Action
+  const size_t result = log_print(message);
+
+  // Assert
+  CHECK(0 == result);
+  CHECK(0 == fake_note_c_static_log_txn_effects.print_calls);
+}
+
+TEST_CASE("test_static_callback_note_txn_start_forwards_to_the_txn_interface_when_txn_is_set", "[Notecard][static-log-txn-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticLogTxnTransactionHooks();
+  Notecard notecard;
+  NoteTxn_Fake fakeTxn;
+  notecard.setTransactionPins(&fakeTxn);
+  REQUIRE(nullptr != fake_note_c_static_log_txn_hooks.txn_start);
+  useFakeNoteLogTxnStaticLogTxn();
+
+  // Action
+  fake_note_c_static_log_txn_hooks.txn_start(917);
+
+  // Assert
+  CHECK(1 == fake_note_c_static_log_txn_effects.start_calls);
+}
+
+TEST_CASE("test_static_callback_note_txn_start_forwards_the_timeout_ms_when_txn_is_set", "[Notecard][static-log-txn-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticLogTxnTransactionHooks();
+  Notecard notecard;
+  NoteTxn_Fake fakeTxn;
+  notecard.setTransactionPins(&fakeTxn);
+  REQUIRE(nullptr != fake_note_c_static_log_txn_hooks.txn_start);
+  useFakeNoteLogTxnStaticLogTxn();
+  const uint32_t TIMEOUT_MS = 917;
+
+  // Action
+  fake_note_c_static_log_txn_hooks.txn_start(TIMEOUT_MS);
+
+  // Assert
+  CHECK(TIMEOUT_MS == fake_note_c_static_log_txn_effects.start_timeout_ms);
+}
+
+TEST_CASE("test_static_callback_note_txn_start_returns_the_txn_interface_result_when_txn_is_set", "[Notecard][static-log-txn-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticLogTxnTransactionHooks();
+  Notecard notecard;
+  NoteTxn_Fake fakeTxn;
+  notecard.setTransactionPins(&fakeTxn);
+  REQUIRE(nullptr != fake_note_c_static_log_txn_hooks.txn_start);
+  useFakeNoteLogTxnStaticLogTxn();
+  fake_note_c_static_log_txn_effects.start_return = true;
+
+  // Action
+  const bool result = fake_note_c_static_log_txn_hooks.txn_start(917);
+
+  // Assert
+  CHECK(true == result);
+  CHECK(1 == fake_note_c_static_log_txn_effects.start_calls);
+}
+
+TEST_CASE("test_static_callback_note_txn_start_does_not_call_the_txn_interface_when_txn_is_null", "[Notecard][static-log-txn-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticLogTxnTransactionHooks();
+  Notecard notecard;
+  NoteTxn_Fake fakeTxn;
+  notecard.setTransactionPins(&fakeTxn);
+  REQUIRE(nullptr != fake_note_c_static_log_txn_hooks.txn_start);
+  txnStartFn txn_start = fake_note_c_static_log_txn_hooks.txn_start;
+  notecard.setTransactionPins(static_cast<NoteTxn *>(nullptr));
+  useFakeNoteLogTxnStaticLogTxn();
+
+  // Action
+  txn_start(917);
+
+  // Assert
+  CHECK(0 == fake_note_c_static_log_txn_effects.start_calls);
+}
+
+TEST_CASE("test_static_callback_note_txn_start_returns_true_when_txn_is_null", "[Notecard][static-log-txn-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticLogTxnTransactionHooks();
+  Notecard notecard;
+  NoteTxn_Fake fakeTxn;
+  notecard.setTransactionPins(&fakeTxn);
+  REQUIRE(nullptr != fake_note_c_static_log_txn_hooks.txn_start);
+  txnStartFn txn_start = fake_note_c_static_log_txn_hooks.txn_start;
+  notecard.setTransactionPins(static_cast<NoteTxn *>(nullptr));
+  useFakeNoteLogTxnStaticLogTxn();
+  fake_note_c_static_log_txn_effects.start_return = false;
+
+  // Action
+  const bool result = txn_start(917);
+
+  // Assert
+  CHECK(true == result);
+  CHECK(0 == fake_note_c_static_log_txn_effects.start_calls);
+}
+
+TEST_CASE("test_static_callback_note_txn_stop_forwards_to_the_txn_interface_when_txn_is_set", "[Notecard][static-log-txn-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticLogTxnTransactionHooks();
+  Notecard notecard;
+  NoteTxn_Fake fakeTxn;
+  notecard.setTransactionPins(&fakeTxn);
+  REQUIRE(nullptr != fake_note_c_static_log_txn_hooks.txn_stop);
+  useFakeNoteLogTxnStaticLogTxn();
+
+  // Action
+  fake_note_c_static_log_txn_hooks.txn_stop();
+
+  // Assert
+  CHECK(1 == fake_note_c_static_log_txn_effects.stop_calls);
+}
+
+TEST_CASE("test_static_callback_note_txn_stop_does_not_call_the_txn_interface_when_txn_is_null", "[Notecard][static-log-txn-callbacks]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCStaticLogTxnTransactionHooks();
+  Notecard notecard;
+  NoteTxn_Fake fakeTxn;
+  notecard.setTransactionPins(&fakeTxn);
+  REQUIRE(nullptr != fake_note_c_static_log_txn_hooks.txn_stop);
+  txnStopFn txn_stop = fake_note_c_static_log_txn_hooks.txn_stop;
+  notecard.setTransactionPins(static_cast<NoteTxn *>(nullptr));
+  useFakeNoteLogTxnStaticLogTxn();
+
+  // Action
+  txn_stop();
+
+  // Assert
+  CHECK(0 == fake_note_c_static_log_txn_effects.stop_calls);
 }
 
 TEST_CASE("test_static_callback_note_log_print_invokes_notelog_print", "[Notecard]")
