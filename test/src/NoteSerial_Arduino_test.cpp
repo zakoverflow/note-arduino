@@ -349,31 +349,3 @@ TEST_CASE("test_noteserial_arduino_transmit_does_not_flush_the_serial_port_when_
     CHECK(fake_serial_port.pending_output == "Hold, Please!");
     CHECK(fake_serial_port.drained_output.empty());
 }
-
-TEST_CASE("test_noteserial_arduino_transmit_invokes_hardware_serial_flush_when_flush_parameter_is_true", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-    RESET_FAKE(HardwareSerial_flush);
-
-    // Action
-    noteserial.transmit(reinterpret_cast<uint8_t *>(const_cast<char *>("Hello, Test!")), 13, true);
-
-    // Assert
-    CHECK(HardwareSerial_flush_fake.call_count);
-}
-
-TEST_CASE("test_noteserial_arduino_transmit_does_not_invoke_hardware_serial_flush_when_flush_parameter_is_false", "[NoteSerial_Arduino]")
-{
-  resetFakes();
-    // Arrange
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
-    RESET_FAKE(HardwareSerial_flush);
-
-    // Action
-    noteserial.transmit(reinterpret_cast<uint8_t *>(const_cast<char *>("Hello, Test 14!")), 16, false);
-
-    // Assert
-    CHECK(!HardwareSerial_flush_fake.call_count);
-}
