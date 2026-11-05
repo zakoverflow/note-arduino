@@ -22,6 +22,109 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+
+namespace {
+
+// Stateful fakes for Notecard::begin(NoteI2c*) platform path (X5 begin-i2c-platform).
+// Unique names for merge with #22–#25. Captures NoteSetUserAgent text,
+// NoteSetFnDefault hooks (when I2C is set), and NoteSetFn clears (when nullptr).
+
+struct FakeNoteCBeginI2cPlatformUserAgent {
+    char text[64];
+};
+FakeNoteCBeginI2cPlatformUserAgent fake_note_c_begin_i2c_platform_ua;
+
+struct FakeNoteCBeginI2cPlatformHooks {
+    mallocFn malloc_hook;
+    freeFn free_hook;
+    delayMsFn delay_hook;
+    getMsFn millis_hook;
+};
+FakeNoteCBeginI2cPlatformHooks fake_note_c_begin_i2c_platform_hooks;
+
+struct FakeNoteCBeginI2cPlatformEffects {
+    uint32_t last_delay_ms;
+    uint32_t millis_return;
+};
+FakeNoteCBeginI2cPlatformEffects fake_note_c_begin_i2c_platform_effects;
+
+void fakeNoteSetUserAgentBeginI2cPlatform(char * agent)
+{
+    if (agent) {
+        strncpy(fake_note_c_begin_i2c_platform_ua.text, agent,
+                     sizeof(fake_note_c_begin_i2c_platform_ua.text) - 1);
+        fake_note_c_begin_i2c_platform_ua.text[sizeof(fake_note_c_begin_i2c_platform_ua.text) - 1] = '\0';
+    } else {
+        fake_note_c_begin_i2c_platform_ua.text[0] = '\0';
+    }
+}
+
+void fakeNoteSetFnDefaultBeginI2cPlatform(mallocFn malloc_hook, freeFn free_hook, delayMsFn delay_hook, getMsFn millis_hook)
+{
+    fake_note_c_begin_i2c_platform_hooks.malloc_hook = malloc_hook;
+    fake_note_c_begin_i2c_platform_hooks.free_hook = free_hook;
+    fake_note_c_begin_i2c_platform_hooks.delay_hook = delay_hook;
+    fake_note_c_begin_i2c_platform_hooks.millis_hook = millis_hook;
+}
+
+void fakeNoteSetFnBeginI2cPlatform(mallocFn malloc_hook, freeFn free_hook, delayMsFn delay_hook, getMsFn millis_hook)
+{
+    fake_note_c_begin_i2c_platform_hooks.malloc_hook = malloc_hook;
+    fake_note_c_begin_i2c_platform_hooks.free_hook = free_hook;
+    fake_note_c_begin_i2c_platform_hooks.delay_hook = delay_hook;
+    fake_note_c_begin_i2c_platform_hooks.millis_hook = millis_hook;
+}
+
+void fakeNoteDelayBeginI2cPlatform(uint32_t ms)
+{
+    fake_note_c_begin_i2c_platform_effects.last_delay_ms = ms;
+}
+
+uint32_t fakeNoteMillisBeginI2cPlatform(void)
+{
+    return fake_note_c_begin_i2c_platform_effects.millis_return;
+}
+
+// Call after resetFakes(). Captures the user-agent string NoteSetUserAgent receives.
+void useFakeNoteCBeginI2cPlatformUserAgent(void)
+{
+    fake_note_c_begin_i2c_platform_ua.text[0] = '\0';
+    NoteSetUserAgent_fake.custom_fake = fakeNoteSetUserAgentBeginI2cPlatform;
+}
+
+// Call after resetFakes(). Captures NoteSetFnDefault (I2C present path).
+void useFakeNoteCBeginI2cPlatformDefaults(void)
+{
+    fake_note_c_begin_i2c_platform_hooks.malloc_hook = nullptr;
+    fake_note_c_begin_i2c_platform_hooks.free_hook = nullptr;
+    fake_note_c_begin_i2c_platform_hooks.delay_hook = nullptr;
+    fake_note_c_begin_i2c_platform_hooks.millis_hook = nullptr;
+    NoteSetFnDefault_fake.custom_fake = fakeNoteSetFnDefaultBeginI2cPlatform;
+}
+
+// Call after resetFakes(). Captures NoteSetFn clears (I2C nullptr path).
+// Sentinels start non-null so a skipped clear fails.
+void useFakeNoteCBeginI2cPlatformClears(void)
+{
+    fake_note_c_begin_i2c_platform_hooks.malloc_hook = reinterpret_cast<mallocFn>(0x1);
+    fake_note_c_begin_i2c_platform_hooks.free_hook = reinterpret_cast<freeFn>(0x1);
+    fake_note_c_begin_i2c_platform_hooks.delay_hook = reinterpret_cast<delayMsFn>(0x1);
+    fake_note_c_begin_i2c_platform_hooks.millis_hook = reinterpret_cast<getMsFn>(0x1);
+    NoteSetFn_fake.custom_fake = fakeNoteSetFnBeginI2cPlatform;
+}
+
+// Call after resetFakes() (and typically after begin). Captures noteDelay /
+// noteMillis FFF fakes so installed platform hooks can be shown to forward.
+void useFakeNoteTimeBeginI2cPlatform(void)
+{
+    fake_note_c_begin_i2c_platform_effects.last_delay_ms = 0;
+    fake_note_c_begin_i2c_platform_effects.millis_return = 0;
+    noteDelay_fake.custom_fake = fakeNoteDelayBeginI2cPlatform;
+    noteMillis_fake.custom_fake = fakeNoteMillisBeginI2cPlatform;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -230,6 +333,169 @@ TEST_CASE("test_notecard_begin_i2c_sets_millis_function_pointer_to_nullptr_when_
   ///////////
 
   CHECK(!NoteSetFnDefault_fake.arg3_val);
+}
+
+
+// X5 begin-i2c-platform outcomes: user-agent string and platform malloc/free/
+// delay/millis hooks from begin(NoteI2c*). Tags: [Notecard][begin-i2c-platform].
+TEST_CASE("test_notecard_begin_i2c_sets_user_agent_string_to_note_arduino_when_i2c_is_set", "[Notecard][begin-i2c-platform]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginI2cPlatformUserAgent();
+  static const char * const EXPECTED = "note-arduino " NOTE_ARDUINO_VERSION;
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+
+  // Action
+  notecard.begin(&fakeI2c);
+
+  // Assert
+  CHECK(0 == strcmp(EXPECTED, fake_note_c_begin_i2c_platform_ua.text));
+}
+
+TEST_CASE("test_notecard_begin_i2c_sets_user_agent_string_to_note_arduino_when_i2c_is_null", "[Notecard][begin-i2c-platform]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginI2cPlatformUserAgent();
+  static const char * const EXPECTED = "note-arduino " NOTE_ARDUINO_VERSION;
+  Notecard notecard;
+
+  // Action
+  notecard.begin(static_cast<NoteI2c *>(nullptr));
+
+  // Assert
+  CHECK(0 == strcmp(EXPECTED, fake_note_c_begin_i2c_platform_ua.text));
+}
+
+TEST_CASE("test_notecard_begin_i2c_installs_a_malloc_hook_when_i2c_is_set", "[Notecard][begin-i2c-platform]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginI2cPlatformDefaults();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+
+  // Action
+  notecard.begin(&fakeI2c);
+
+  // Assert — a malloc hook is installed and allocates
+  REQUIRE(nullptr != fake_note_c_begin_i2c_platform_hooks.malloc_hook);
+  void * const block = fake_note_c_begin_i2c_platform_hooks.malloc_hook(8);
+  REQUIRE(nullptr != block);
+  free(block);
+}
+
+TEST_CASE("test_notecard_begin_i2c_leaves_no_malloc_hook_when_i2c_is_null", "[Notecard][begin-i2c-platform]")
+{
+  resetFakes();
+  // Arrange — capture NoteSetFn clears (nullptr path)
+  useFakeNoteCBeginI2cPlatformClears();
+  Notecard notecard;
+
+  // Action
+  notecard.begin(static_cast<NoteI2c *>(nullptr));
+
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_i2c_platform_hooks.malloc_hook);
+}
+
+TEST_CASE("test_notecard_begin_i2c_installs_a_free_hook_when_i2c_is_set", "[Notecard][begin-i2c-platform]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginI2cPlatformDefaults();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+
+  // Action
+  notecard.begin(&fakeI2c);
+
+  // Assert — a free hook is installed and frees an allocated block
+  REQUIRE(nullptr != fake_note_c_begin_i2c_platform_hooks.free_hook);
+  void * const block = malloc(8);
+  REQUIRE(nullptr != block);
+  fake_note_c_begin_i2c_platform_hooks.free_hook(block);
+}
+
+TEST_CASE("test_notecard_begin_i2c_leaves_no_free_hook_when_i2c_is_null", "[Notecard][begin-i2c-platform]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginI2cPlatformClears();
+  Notecard notecard;
+
+  // Action
+  notecard.begin(static_cast<NoteI2c *>(nullptr));
+
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_i2c_platform_hooks.free_hook);
+}
+
+TEST_CASE("test_notecard_begin_i2c_installs_a_delay_hook_that_forwards_to_note_delay_when_i2c_is_set", "[Notecard][begin-i2c-platform]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginI2cPlatformDefaults();
+  useFakeNoteTimeBeginI2cPlatform();
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  const uint32_t MS = 42;
+
+  // Action
+  notecard.begin(&fakeI2c);
+
+  // Assert — delay hook forwards to noteDelay
+  REQUIRE(nullptr != fake_note_c_begin_i2c_platform_hooks.delay_hook);
+  fake_note_c_begin_i2c_platform_hooks.delay_hook(MS);
+  CHECK(MS == fake_note_c_begin_i2c_platform_effects.last_delay_ms);
+}
+
+TEST_CASE("test_notecard_begin_i2c_leaves_no_delay_hook_when_i2c_is_null", "[Notecard][begin-i2c-platform]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginI2cPlatformClears();
+  Notecard notecard;
+
+  // Action
+  notecard.begin(static_cast<NoteI2c *>(nullptr));
+
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_i2c_platform_hooks.delay_hook);
+}
+
+TEST_CASE("test_notecard_begin_i2c_installs_a_millis_hook_that_forwards_to_note_millis_when_i2c_is_set", "[Notecard][begin-i2c-platform]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginI2cPlatformDefaults();
+  useFakeNoteTimeBeginI2cPlatform();
+  fake_note_c_begin_i2c_platform_effects.millis_return = 1234;
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+
+  // Action
+  notecard.begin(&fakeI2c);
+
+  // Assert
+  REQUIRE(nullptr != fake_note_c_begin_i2c_platform_hooks.millis_hook);
+  CHECK(1234 == fake_note_c_begin_i2c_platform_hooks.millis_hook());
+}
+
+TEST_CASE("test_notecard_begin_i2c_leaves_no_millis_hook_when_i2c_is_null", "[Notecard][begin-i2c-platform]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCBeginI2cPlatformClears();
+  Notecard notecard;
+
+  // Action
+  notecard.begin(static_cast<NoteI2c *>(nullptr));
+
+  // Assert
+  CHECK(nullptr == fake_note_c_begin_i2c_platform_hooks.millis_hook);
 }
 
 TEST_CASE("test_notecard_begin_i2c_does_not_modify_i2c_address_parameter_before_passing_to_note_c", "[Notecard]")
