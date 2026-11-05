@@ -1519,15 +1519,16 @@ TEST_CASE("test_notecard_sendRequest_returns_the_note_c_bool_result", "[Notecard
   resetFakes();
   // Arrange
   useFakeNoteCSendRequest();
-  fake_note_c_send_request.return_val = false;
   Notecard notecard;
 
-  // Action
-  const bool result = notecard.sendRequest(nullptr);
-
-  // Assert
-  CHECK(false == result);
+  // Action / Assert: both note-c bools must pass through unchanged.
+  fake_note_c_send_request.return_val = false;
+  CHECK(false == notecard.sendRequest(nullptr));
   CHECK(1 == fake_note_c_send_request.note_request_calls);
+
+  fake_note_c_send_request.return_val = true;
+  CHECK(true == notecard.sendRequest(nullptr));
+  CHECK(2 == fake_note_c_send_request.note_request_calls);
 }
 
 TEST_CASE("test_notecard_sendRequestWithRetry_forwards_the_json_pointer_to_note_c", "[Notecard][sendRequest]")
@@ -1568,15 +1569,16 @@ TEST_CASE("test_notecard_sendRequestWithRetry_returns_the_note_c_bool_result", "
   resetFakes();
   // Arrange
   useFakeNoteCSendRequestWithRetry();
-  fake_note_c_send_request.return_val = false;
   Notecard notecard;
 
-  // Action
-  const bool result = notecard.sendRequestWithRetry(nullptr, 0);
-
-  // Assert
-  CHECK(false == result);
+  // Action / Assert: both note-c bools must pass through unchanged.
+  fake_note_c_send_request.return_val = false;
+  CHECK(false == notecard.sendRequestWithRetry(nullptr, 0));
   CHECK(1 == fake_note_c_send_request.note_request_with_retry_calls);
+
+  fake_note_c_send_request.return_val = true;
+  CHECK(true == notecard.sendRequestWithRetry(nullptr, 0));
+  CHECK(2 == fake_note_c_send_request.note_request_with_retry_calls);
 }
 
 TEST_CASE("test_notecard_requestAndResponse_does_not_modify_j_object_parameter_value_before_passing_to_note_c", "[Notecard]")
