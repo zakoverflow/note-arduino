@@ -22,6 +22,149 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+
+namespace {
+
+// Stateful fakes for Notecard::end (X5 end group). Unique names so a merge
+// with #22 debug-stream, #23 setFn-hooks, and #24 transaction-pins keeps each
+// group's block. NoteGetFn* reports whether hooks are "set"; NoteSetFn* /
+// make_note_* custom_fakes record clears and singleton teardown.
+
+struct FakeNoteCEndI2cHooks {
+    i2cResetFn reset;
+    i2cTransmitFn transmit;
+    i2cReceiveFn receive;
+    bool get_reports_set;
+};
+FakeNoteCEndI2cHooks fake_note_c_end_i2c;
+
+struct FakeNoteCEndSerialHooks {
+    serialResetFn reset;
+    serialTransmitFn transmit;
+    serialAvailableFn available;
+    serialReceiveFn receive;
+    bool get_reports_set;
+};
+FakeNoteCEndSerialHooks fake_note_c_end_serial;
+
+struct FakeNoteCEndPlatformHooks {
+    mallocFn malloc_hook;
+    freeFn free_hook;
+    delayMsFn delay_hook;
+    getMsFn millis_hook;
+};
+FakeNoteCEndPlatformHooks fake_note_c_end_platform;
+
+struct FakeNoteCEndSingletons {
+    void * last_i2c_arg;
+    int i2c_calls;
+    void * last_serial_arg;
+    int serial_calls;
+};
+FakeNoteCEndSingletons fake_note_c_end_singletons;
+
+void fakeNoteGetFnI2CEnd(uint32_t *, uint32_t *, i2cResetFn *, i2cTransmitFn * transmitFn, i2cReceiveFn *)
+{
+    if (transmitFn) {
+        *transmitFn = fake_note_c_end_i2c.get_reports_set
+            ? reinterpret_cast<i2cTransmitFn>(0x1)
+            : nullptr;
+    }
+}
+
+void fakeNoteSetFnI2CEnd(uint32_t, uint32_t, i2cResetFn reset, i2cTransmitFn transmit, i2cReceiveFn receive)
+{
+    fake_note_c_end_i2c.reset = reset;
+    fake_note_c_end_i2c.transmit = transmit;
+    fake_note_c_end_i2c.receive = receive;
+}
+
+void fakeNoteGetFnSerialEnd(serialResetFn *, serialTransmitFn * transmitFn, serialAvailableFn *, serialReceiveFn *)
+{
+    if (transmitFn) {
+        *transmitFn = fake_note_c_end_serial.get_reports_set
+            ? reinterpret_cast<serialTransmitFn>(0x1)
+            : nullptr;
+    }
+}
+
+void fakeNoteSetFnSerialEnd(serialResetFn reset, serialTransmitFn transmit, serialAvailableFn available, serialReceiveFn receive)
+{
+    fake_note_c_end_serial.reset = reset;
+    fake_note_c_end_serial.transmit = transmit;
+    fake_note_c_end_serial.available = available;
+    fake_note_c_end_serial.receive = receive;
+}
+
+void fakeNoteSetFnEnd(mallocFn malloc_hook, freeFn free_hook, delayMsFn delay_hook, getMsFn millis_hook)
+{
+    fake_note_c_end_platform.malloc_hook = malloc_hook;
+    fake_note_c_end_platform.free_hook = free_hook;
+    fake_note_c_end_platform.delay_hook = delay_hook;
+    fake_note_c_end_platform.millis_hook = millis_hook;
+}
+
+NoteI2c * fakeMakeNoteI2cEnd(void * arg)
+{
+    ++fake_note_c_end_singletons.i2c_calls;
+    fake_note_c_end_singletons.last_i2c_arg = arg;
+    return nullptr;
+}
+
+NoteSerial * fakeMakeNoteSerialEnd(void * arg)
+{
+    ++fake_note_c_end_singletons.serial_calls;
+    fake_note_c_end_singletons.last_serial_arg = arg;
+    return nullptr;
+}
+
+// Call after resetFakes() (and after any begin that must run first). Captures
+// I2C get/set used by end().
+void useFakeNoteCEndI2cHooks(void)
+{
+    fake_note_c_end_i2c.reset = reinterpret_cast<i2cResetFn>(0x1);
+    fake_note_c_end_i2c.transmit = reinterpret_cast<i2cTransmitFn>(0x1);
+    fake_note_c_end_i2c.receive = reinterpret_cast<i2cReceiveFn>(0x1);
+    fake_note_c_end_i2c.get_reports_set = false;
+    NoteGetFnI2C_fake.custom_fake = fakeNoteGetFnI2CEnd;
+    NoteSetFnI2C_fake.custom_fake = fakeNoteSetFnI2CEnd;
+}
+
+// Call after resetFakes() (and after any begin). Captures serial get/set.
+void useFakeNoteCEndSerialHooks(void)
+{
+    fake_note_c_end_serial.reset = reinterpret_cast<serialResetFn>(0x1);
+    fake_note_c_end_serial.transmit = reinterpret_cast<serialTransmitFn>(0x1);
+    fake_note_c_end_serial.available = reinterpret_cast<serialAvailableFn>(0x1);
+    fake_note_c_end_serial.receive = reinterpret_cast<serialReceiveFn>(0x1);
+    fake_note_c_end_serial.get_reports_set = false;
+    NoteGetFnSerial_fake.custom_fake = fakeNoteGetFnSerialEnd;
+    NoteSetFnSerial_fake.custom_fake = fakeNoteSetFnSerialEnd;
+}
+
+// Call after resetFakes() (and after any begin). Captures NoteSetFn clears.
+void useFakeNoteCEndPlatformHooks(void)
+{
+    fake_note_c_end_platform.malloc_hook = reinterpret_cast<mallocFn>(0x1);
+    fake_note_c_end_platform.free_hook = reinterpret_cast<freeFn>(0x1);
+    fake_note_c_end_platform.delay_hook = reinterpret_cast<delayMsFn>(0x1);
+    fake_note_c_end_platform.millis_hook = reinterpret_cast<getMsFn>(0x1);
+    NoteSetFn_fake.custom_fake = fakeNoteSetFnEnd;
+}
+
+// Call after resetFakes() (and after any begin). Captures make_note_* teardown.
+void useFakeNoteCEndSingletons(void)
+{
+    fake_note_c_end_singletons.last_i2c_arg = reinterpret_cast<void *>(0x1);
+    fake_note_c_end_singletons.i2c_calls = 0;
+    fake_note_c_end_singletons.last_serial_arg = reinterpret_cast<void *>(0x1);
+    fake_note_c_end_singletons.serial_calls = 0;
+    make_note_i2c_with_fake.custom_fake = fakeMakeNoteI2cEnd;
+    make_note_serial_with_fake.custom_fake = fakeMakeNoteSerialEnd;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -873,196 +1016,139 @@ TEST_CASE("test_notecard_begin_serial_sets_serial_receive_function_pointer_to_nu
   CHECK(!NoteSetFnSerial_fake.arg3_val);
 }
 
-TEST_CASE("test_notecard_end_does_not_call_wire_end_when_the_i2c_interface_has_not_been_instantiated", "[Notecard]")
+
+// X5 end outcomes: cleared note-c I2C/serial/platform hooks and singleton
+// teardown via make_note_*(nullptr). Tags: [Notecard][end].
+TEST_CASE("test_notecard_end_leaves_i2c_singleton_untouched_when_i2c_hooks_are_not_set", "[Notecard][end]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange — I2C hooks reported unset; capture make_note_i2c
   Notecard notecard;
   NoteSerial_Fake fakeSerial;
-  RESET_FAKE(NoteSetFnSerial);
-  RESET_FAKE(TwoWire_end);
   notecard.begin(&fakeSerial);
-  RESET_FAKE(NoteGetFnI2C);
-  RESET_FAKE(NoteGetFnSerial);
-  RESET_FAKE(make_note_i2c_with);
+  useFakeNoteCEndI2cHooks();
+  useFakeNoteCEndSingletons();
+  fake_note_c_end_i2c.get_reports_set = false;
 
-   // Action
-  ///////////
-
+  // Action
   notecard.end();
 
-   // Assert
-  ///////////
-
-  CHECK(!make_note_i2c_with_fake.call_count);
+  // Assert — I2C singleton is not torn down
+  CHECK(0 == fake_note_c_end_singletons.i2c_calls);
 }
 
-TEST_CASE("test_notecard_end_clears_all_i2c_interface_function_pointers_when_the_i2c_interface_has_been_instantiated", "[Notecard]")
+TEST_CASE("test_notecard_end_clears_i2c_hooks_when_i2c_hooks_are_set", "[Notecard][end]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange — I2C hooks reported set; capture NoteSetFnI2C
   Notecard notecard;
   NoteI2c_Fake fakeI2c;
-  RESET_FAKE(NoteSetFnI2C);
   notecard.begin(&fakeI2c);
-  RESET_FAKE(NoteGetFnSerial);
-  RESET_FAKE(NoteGetFnI2C);
-  NoteGetFnI2C_fake.custom_fake = [](uint32_t *, uint32_t *, i2cResetFn *, i2cTransmitFn * transmitFn, i2cReceiveFn *) {
-    if (transmitFn) { *transmitFn = reinterpret_cast<i2cTransmitFn>(0x1); }
-  };
+  useFakeNoteCEndI2cHooks();
+  useFakeNoteCEndSerialHooks();
+  fake_note_c_end_i2c.get_reports_set = true;
 
-   // Action
-  ///////////
-
+  // Action
   notecard.end();
 
-   // Assert
-  ///////////
-
-  CHECK(!NoteSetFnI2C_fake.arg2_val);
-  CHECK(!NoteSetFnI2C_fake.arg3_val);
-  CHECK(!NoteSetFnI2C_fake.arg4_val);
+  // Assert — I2C reset/transmit/receive hooks are cleared
+  CHECK(nullptr == fake_note_c_end_i2c.reset);
+  CHECK(nullptr == fake_note_c_end_i2c.transmit);
+  CHECK(nullptr == fake_note_c_end_i2c.receive);
 }
 
-TEST_CASE("test_notecard_end_does_not_call_serial_end_when_the_serial_interface_has_not_been_instantiated", "[Notecard]")
+TEST_CASE("test_notecard_end_leaves_serial_singleton_untouched_when_serial_hooks_are_not_set", "[Notecard][end]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
-  Notecard notecard;
-  NoteSerial_Fake fakeI2c;
-  RESET_FAKE(NoteSetFnDefault);
-  notecard.begin(&fakeI2c);
-  RESET_FAKE(HardwareSerial_end);
-  RESET_FAKE(NoteGetFnI2C);
-  RESET_FAKE(NoteGetFnSerial);
-  RESET_FAKE(make_note_serial_with);
-
-   // Action
-  ///////////
-
-  notecard.end();
-
-   // Assert
-  ///////////
-
-  CHECK(!make_note_serial_with_fake.call_count);
-}
-
-TEST_CASE("test_notecard_end_clears_all_serial_interface_function_pointers_when_the_serial_interface_has_been_instantiated", "[Notecard]")
-{
-  resetFakes();
-   // Arrange
-  ////////////
-
-  Notecard notecard;
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  RESET_FAKE(NoteSetFnDefault);
-  notecard.begin(&fakeSerial);
-  RESET_FAKE(NoteGetFnI2C);
-  RESET_FAKE(NoteGetFnSerial);
-  NoteGetFnSerial_fake.custom_fake = [](serialResetFn *, serialTransmitFn * transmitFn, serialAvailableFn *, serialReceiveFn *) {
-    if (transmitFn) { *transmitFn = reinterpret_cast<serialTransmitFn>(0x1); }
-  };
-
-   // Action
-  ///////////
-
-  notecard.end();
-
-   // Assert
-  ///////////
-
-  CHECK(!NoteSetFnSerial_fake.arg0_val);
-  CHECK(!NoteSetFnSerial_fake.arg1_val);
-  CHECK(!NoteSetFnSerial_fake.arg2_val);
-  CHECK(!NoteSetFnSerial_fake.arg3_val);
-}
-
-TEST_CASE("test_notecard_end_clears_all_platform_interface_function_pointers", "[Notecard]")
-{
-  resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange — serial hooks reported unset; capture make_note_serial
   Notecard notecard;
   NoteI2c_Fake fakeI2c;
-  RESET_FAKE(NoteSetFn);
   notecard.begin(&fakeI2c);
+  useFakeNoteCEndSerialHooks();
+  useFakeNoteCEndSingletons();
+  fake_note_c_end_serial.get_reports_set = false;
 
-   // Action
-  ///////////
-
+  // Action
   notecard.end();
 
-   // Assert
-  ///////////
-
-  CHECK(!NoteSetFn_fake.arg0_val);
-  CHECK(!NoteSetFn_fake.arg1_val);
-  CHECK(!NoteSetFn_fake.arg2_val);
-  CHECK(!NoteSetFn_fake.arg3_val);
+  // Assert
+  CHECK(0 == fake_note_c_end_singletons.serial_calls);
 }
 
-TEST_CASE("test_notecard_end_provides_nullptr_to_make_note_i2c_to_free_associated_memory_when_the_i2c_interface_has_been_instantiated", "[Notecard]")
+TEST_CASE("test_notecard_end_clears_serial_hooks_when_serial_hooks_are_set", "[Notecard][end]")
 {
   resetFakes();
-   // Arrange
-  ////////////
-
+  // Arrange
   Notecard notecard;
-  NoteI2c_Fake fakeI2c;  // Instantiate NoteI2c (faked)
-  RESET_FAKE(make_note_i2c_with);
-  make_note_i2c_with_fake.arg0_val = &Wire;
-  notecard.begin(&fakeI2c);
-  RESET_FAKE(NoteGetFnSerial);
-  RESET_FAKE(NoteGetFnI2C);
-  NoteGetFnI2C_fake.custom_fake = [](uint32_t *, uint32_t *, i2cResetFn *, i2cTransmitFn * transmitFn, i2cReceiveFn *) {
-    if (transmitFn) { *transmitFn = reinterpret_cast<i2cTransmitFn>(0x1); }
-  };
-
-   // Action
-  ////////////
-
-  notecard.end();
-
-   // Assert
-  ////////////
-
-  CHECK(nullptr == make_note_i2c_with_fake.arg0_val);
-}
-
-TEST_CASE("test_notecard_end_invokes_make_note_serial_nullptr_method_to_free_associated_memory_when_the_serial_interface_has_been_instantiated", "[Notecard]")
-{
-  resetFakes();
-   // Arrange
-  ////////////
-
-  Notecard notecard;
-  NoteSerial_Fake fakeSerial;  // Instantiate NoteSerial (faked)
-  RESET_FAKE(make_note_serial_with);
-  make_note_serial_with_fake.arg0_val = &Serial;
+  NoteSerial_Fake fakeSerial;
   notecard.begin(&fakeSerial);
-  RESET_FAKE(NoteGetFnI2C);
-  RESET_FAKE(NoteGetFnSerial);
-  NoteGetFnSerial_fake.custom_fake = [](serialResetFn *, serialTransmitFn * transmitFn, serialAvailableFn *, serialReceiveFn *) {
-    if (transmitFn) { *transmitFn = reinterpret_cast<serialTransmitFn>(0x1); }
-  };
+  useFakeNoteCEndI2cHooks();
+  useFakeNoteCEndSerialHooks();
+  fake_note_c_end_serial.get_reports_set = true;
 
-   // Action
-  ////////////
-
+  // Action
   notecard.end();
 
-   // Assert
-  ////////////
+  // Assert
+  CHECK(nullptr == fake_note_c_end_serial.reset);
+  CHECK(nullptr == fake_note_c_end_serial.transmit);
+  CHECK(nullptr == fake_note_c_end_serial.available);
+  CHECK(nullptr == fake_note_c_end_serial.receive);
+}
 
-  CHECK(nullptr == make_note_serial_with_fake.arg0_val);
+TEST_CASE("test_notecard_end_clears_platform_hooks", "[Notecard][end]")
+{
+  resetFakes();
+  // Arrange — capture NoteSetFn; end always clears platform hooks
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  useFakeNoteCEndPlatformHooks();
+
+  // Action
+  notecard.end();
+
+  // Assert
+  CHECK(nullptr == fake_note_c_end_platform.malloc_hook);
+  CHECK(nullptr == fake_note_c_end_platform.free_hook);
+  CHECK(nullptr == fake_note_c_end_platform.delay_hook);
+  CHECK(nullptr == fake_note_c_end_platform.millis_hook);
+}
+
+TEST_CASE("test_notecard_end_frees_i2c_singleton_with_nullptr_when_i2c_hooks_are_set", "[Notecard][end]")
+{
+  resetFakes();
+  // Arrange
+  Notecard notecard;
+  NoteI2c_Fake fakeI2c;
+  notecard.begin(&fakeI2c);
+  useFakeNoteCEndI2cHooks();
+  useFakeNoteCEndSingletons();
+  fake_note_c_end_i2c.get_reports_set = true;
+
+  // Action
+  notecard.end();
+
+  // Assert — singleton freed with nullptr (end state; call count not locked)
+  CHECK(nullptr == fake_note_c_end_singletons.last_i2c_arg);
+}
+
+TEST_CASE("test_notecard_end_frees_serial_singleton_with_nullptr_when_serial_hooks_are_set", "[Notecard][end]")
+{
+  resetFakes();
+  // Arrange
+  Notecard notecard;
+  NoteSerial_Fake fakeSerial;
+  notecard.begin(&fakeSerial);
+  useFakeNoteCEndSerialHooks();
+  useFakeNoteCEndSingletons();
+  fake_note_c_end_serial.get_reports_set = true;
+
+  // Action
+  notecard.end();
+
+  // Assert — singleton freed with nullptr (end state; call count not locked)
+  CHECK(nullptr == fake_note_c_end_singletons.last_serial_arg);
 }
 
 TEST_CASE("test_notecard_setDebugOutputStream_shares_a_debug_log_function_pointer", "[Notecard]")
