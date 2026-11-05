@@ -89,6 +89,40 @@ add_test(NoteLog_Arduino)
 add_test(NoteSerial_Arduino)
 add_test(NoteTxn_Arduino)
 
+
+# Integration harness (D15): real Notecard.cpp + real Note*_Arduino.cpp units
+# linked against the FFF note-c and Arduino HAL fakes under test/. The product
+# interface units are not stubbed. Built without --coverage so this target does
+# not change the coverage numbers the gate reads.
+set(NOTECARD_INTEGRATION_TEST Notecard_integration_test)
+add_executable(${NOTECARD_INTEGRATION_TEST}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Notecard_integration_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/arduino_fakes.cpp
+    ${NOTE_ARDUINO_SRC_DIR}/Notecard.cpp
+    ${NOTE_ARDUINO_SRC_DIR}/NoteI2c_Arduino.cpp
+    ${NOTE_ARDUINO_SRC_DIR}/NoteLog_Arduino.cpp
+    ${NOTE_ARDUINO_SRC_DIR}/NoteSerial_Arduino.cpp
+    ${NOTE_ARDUINO_SRC_DIR}/NoteTime_Arduino.cpp
+    ${NOTE_ARDUINO_SRC_DIR}/NoteTxn_Arduino.cpp
+)
+target_include_directories(${NOTECARD_INTEGRATION_TEST}
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE ${NOTE_ARDUINO_SRC_DIR}
+)
+target_compile_definitions(${NOTECARD_INTEGRATION_TEST} PRIVATE NOTE_MOCK)
+target_link_libraries(${NOTECARD_INTEGRATION_TEST} PRIVATE Catch2::Catch2WithMain)
+target_compile_options(${NOTECARD_INTEGRATION_TEST}
+    PRIVATE -Wall
+    PRIVATE -Wextra
+    PRIVATE -Werror
+    PRIVATE -Wpedantic
+    PRIVATE -Wno-deprecated-declarations
+    PRIVATE -O0
+    PRIVATE -ggdb
+)
+list(APPEND TEST_TARGETS ${NOTECARD_INTEGRATION_TEST})
+catch_discover_tests(${NOTECARD_INTEGRATION_TEST} TEST_SUFFIX " [integration]")
+
 if(NOTE_ARDUINO_COVERAGE)
     find_program(LCOV lcov REQUIRED)
     message(STATUS "Found lcov: ${LCOV}")
