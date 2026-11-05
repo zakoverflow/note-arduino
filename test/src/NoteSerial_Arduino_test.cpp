@@ -20,13 +20,17 @@ static void resetFakes(void)
 
 namespace {
 
-// Stateful fake of the transmit side of a serial port.
-// It is built on the FFF fake HardwareSerial_write (custom_fake). The state is
-// a plain struct, because an FFF custom_fake is a function pointer.
+// Stateful fake of a serial port (begin and transmit sides).
+// It is built on the FFF fakes HardwareSerial_begin and HardwareSerial_write
+// (custom_fake). The state is a plain struct, because an FFF custom_fake is a
+// function pointer.
+// begin records that the port is open and the baud it was begun at.
 // Every write call appends the bytes the port accepted to bytes_written.
 struct FakeSerialPort {
     std::string bytes_written;       // everything the port accepted, in order
     size_t max_bytes_per_write;      // the port accepts at most this many bytes per write call
+    bool is_open;                    // true after begin has opened the port
+    unsigned int baud_rate;          // baud the port was begun at (last begin)
 };
 FakeSerialPort fake_serial_port;
 
@@ -37,12 +41,26 @@ size_t fakeSerialPortWrite(uint8_t * buffer, size_t size)
     return accepted;
 }
 
-// Install the fake port in place of the capture fake. Call after resetFakes().
+void fakeSerialPortBegin(unsigned int baud)
+{
+    fake_serial_port.is_open = true;
+    fake_serial_port.baud_rate = baud;
+}
+
+// Install the fake port write side. Call after resetFakes().
 void useFakeSerialPort(size_t max_bytes_per_write = SIZE_MAX)
 {
     fake_serial_port.bytes_written.clear();
     fake_serial_port.max_bytes_per_write = max_bytes_per_write;
     HardwareSerial_write_fake.custom_fake = fakeSerialPortWrite;
+}
+
+// Install the fake port begin side. Call after resetFakes().
+void useFakeSerialPortBegin(void)
+{
+    fake_serial_port.is_open = false;
+    fake_serial_port.baud_rate = 0;
+    HardwareSerial_begin_fake.custom_fake = fakeSerialPortBegin;
 }
 
 } // namespace
@@ -97,32 +115,36 @@ TEST_CASE("test_make_note_serial_deletes_singleton_when_nullptr_is_passed_as_par
     CHECK(nullptr == noteserial);
 }
 
-TEST_CASE("test_noteserial_arduino_constructor_invokes_hardware_serial_parameter_begin_method", "[NoteSerial_Arduino]")
+TEST_CASE("test_noteserial_arduino_constructor_opens_the_serial_port_at_9600_baud_when_that_baud_is_passed", "[NoteSerial_Arduino][begin]")
 {
   resetFakes();
     // Arrange
-    RESET_FAKE(HardwareSerial_begin);
+    // Constructing NoteSerial_Arduino must open the serial port at the baud the
+    // caller passed. 9600 is one of two distinct bauds locked by this group.
+    useFakeSerialPortBegin();
 
     // Action
     NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
 
     // Assert
-    CHECK(HardwareSerial_begin_fake.call_count);
+    CHECK(fake_serial_port.is_open);
+    CHECK(9600u == fake_serial_port.baud_rate);
 }
 
-TEST_CASE("test_noteserial_arduino_constructor_does_not_modify_baud_parameter_before_passing_to_hardware_serial_begin", "[NoteSerial_Arduino]")
+TEST_CASE("test_noteserial_arduino_constructor_opens_the_serial_port_at_115200_baud_when_that_baud_is_passed", "[NoteSerial_Arduino][begin]")
 {
   resetFakes();
     // Arrange
-    const size_t EXPECTED_BAUD_RATE = 9600;
-
-    RESET_FAKE(HardwareSerial_begin);
+    // A second distinct baud locks that begin uses the caller value, not a
+    // constant (a constant-9600 mutant passes the 9600 test and fails here).
+    useFakeSerialPortBegin();
 
     // Action
-    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, EXPECTED_BAUD_RATE);
+    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 115200);
 
     // Assert
-    CHECK(EXPECTED_BAUD_RATE == HardwareSerial_begin_fake.arg0_val);
+    CHECK(fake_serial_port.is_open);
+    CHECK(115200u == fake_serial_port.baud_rate);
 }
 
 TEST_CASE("test_noteserial_arduino_deconstructor_invokes_hardware_serial_end_method", "[NoteSerial_Arduino]")
