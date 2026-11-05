@@ -22,6 +22,61 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+namespace {
+
+// Stateful fakes for Notecard::requestAndResponse / requestAndResponseWithRetry
+// (X5 requestAndResponse). Unique names for merge with #22–#33. Captures the
+// J* and timeout passed to NoteRequestResponse* and the J* they return.
+// (Response JSON / retry semantics live in note-c; not invented here. See Gaps.)
+
+struct FakeNoteCRequestAndResponse {
+    J * req;
+    uint32_t timeout_seconds;
+    J * return_json;
+    int request_response_calls;
+    int request_response_with_retry_calls;
+};
+FakeNoteCRequestAndResponse fake_note_c_request_and_response;
+
+J * fakeNoteRequestResponseRequestAndResponse(J * req)
+{
+    fake_note_c_request_and_response.request_response_calls += 1;
+    fake_note_c_request_and_response.req = req;
+    return fake_note_c_request_and_response.return_json;
+}
+
+J * fakeNoteRequestResponseWithRetryRequestAndResponse(J * req, uint32_t timeout_seconds)
+{
+    fake_note_c_request_and_response.request_response_with_retry_calls += 1;
+    fake_note_c_request_and_response.req = req;
+    fake_note_c_request_and_response.timeout_seconds = timeout_seconds;
+    return fake_note_c_request_and_response.return_json;
+}
+
+// Call after resetFakes(). Captures NoteRequestResponse args and return.
+void useFakeNoteCRequestAndResponse(void)
+{
+    fake_note_c_request_and_response.req = nullptr;
+    fake_note_c_request_and_response.timeout_seconds = 0;
+    fake_note_c_request_and_response.return_json = nullptr;
+    fake_note_c_request_and_response.request_response_calls = 0;
+    fake_note_c_request_and_response.request_response_with_retry_calls = 0;
+    NoteRequestResponse_fake.custom_fake = fakeNoteRequestResponseRequestAndResponse;
+}
+
+// Call after resetFakes(). Captures NoteRequestResponseWithRetry args and return.
+void useFakeNoteCRequestAndResponseWithRetry(void)
+{
+    fake_note_c_request_and_response.req = nullptr;
+    fake_note_c_request_and_response.timeout_seconds = 0;
+    fake_note_c_request_and_response.return_json = nullptr;
+    fake_note_c_request_and_response.request_response_calls = 0;
+    fake_note_c_request_and_response.request_response_with_retry_calls = 0;
+    NoteRequestResponseWithRetry_fake.custom_fake = fakeNoteRequestResponseWithRetryRequestAndResponse;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -1568,6 +1623,98 @@ TEST_CASE("test_notecard_sendRequestWithRetry_does_not_modify_note_c_result_valu
   ///////////
 
   CHECK(EXPECTED_RESULT == ACTUAL_RESULT);
+}
+
+
+// X5 requestAndResponse outcomes: Notecard::requestAndResponse /
+// requestAndResponseWithRetry pass the J* (and timeout) to note-c and return
+// the note-c J* unchanged. Tags: [Notecard][requestAndResponse].
+TEST_CASE("test_notecard_requestAndResponse_forwards_the_json_pointer_to_note_c", "[Notecard][requestAndResponse]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCRequestAndResponse();
+  Notecard notecard;
+  J req;
+  memset(&req, 0x55, sizeof(req));
+
+  // Action
+  notecard.requestAndResponse(&req);
+
+  // Assert
+  CHECK(1 == fake_note_c_request_and_response.request_response_calls);
+  CHECK(&req == fake_note_c_request_and_response.req);
+}
+
+TEST_CASE("test_notecard_requestAndResponse_returns_the_note_c_json_pointer", "[Notecard][requestAndResponse]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCRequestAndResponse();
+  Notecard notecard;
+  J sentinel;
+  memset(&sentinel, 0x55, sizeof(sentinel));
+
+  // Action / Assert: non-null and nullptr note-c returns must pass through.
+  fake_note_c_request_and_response.return_json = &sentinel;
+  CHECK(&sentinel == notecard.requestAndResponse(nullptr));
+  CHECK(1 == fake_note_c_request_and_response.request_response_calls);
+
+  fake_note_c_request_and_response.return_json = nullptr;
+  CHECK(nullptr == notecard.requestAndResponse(nullptr));
+  CHECK(2 == fake_note_c_request_and_response.request_response_calls);
+}
+
+TEST_CASE("test_notecard_requestAndResponseWithRetry_forwards_the_json_pointer_to_note_c", "[Notecard][requestAndResponse]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCRequestAndResponseWithRetry();
+  Notecard notecard;
+  J req;
+  memset(&req, 0x55, sizeof(req));
+
+  // Action
+  notecard.requestAndResponseWithRetry(&req, 0);
+
+  // Assert
+  CHECK(1 == fake_note_c_request_and_response.request_response_with_retry_calls);
+  CHECK(&req == fake_note_c_request_and_response.req);
+}
+
+TEST_CASE("test_notecard_requestAndResponseWithRetry_forwards_the_timeout_to_note_c", "[Notecard][requestAndResponse]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCRequestAndResponseWithRetry();
+  Notecard notecard;
+  const uint32_t TIMEOUT = 10;
+
+  // Action
+  notecard.requestAndResponseWithRetry(nullptr, TIMEOUT);
+
+  // Assert
+  CHECK(TIMEOUT == fake_note_c_request_and_response.timeout_seconds);
+  CHECK(1 == fake_note_c_request_and_response.request_response_with_retry_calls);
+}
+
+TEST_CASE("test_notecard_requestAndResponseWithRetry_returns_the_note_c_json_pointer", "[Notecard][requestAndResponse]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCRequestAndResponseWithRetry();
+  Notecard notecard;
+  J sentinel;
+  memset(&sentinel, 0xA5, sizeof(sentinel));
+
+  // Action / Assert: non-null and nullptr note-c returns must pass through.
+  fake_note_c_request_and_response.return_json = &sentinel;
+  CHECK(&sentinel == notecard.requestAndResponseWithRetry(nullptr, 0));
+  CHECK(1 == fake_note_c_request_and_response.request_response_with_retry_calls);
+
+  fake_note_c_request_and_response.return_json = nullptr;
+  CHECK(nullptr == notecard.requestAndResponseWithRetry(nullptr, 0));
+  CHECK(2 == fake_note_c_request_and_response.request_response_with_retry_calls);
 }
 
 TEST_CASE("test_notecard_requestAndResponse_does_not_modify_j_object_parameter_value_before_passing_to_note_c", "[Notecard]")
