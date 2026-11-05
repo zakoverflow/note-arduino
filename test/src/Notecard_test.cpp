@@ -22,6 +22,62 @@ static void resetFakes(void)
   resetNoteInterfaceFakes();
 }
 
+
+namespace {
+
+// Stateful fakes for Notecard::sendRequest / sendRequestWithRetry (X5 sendRequest).
+// Unique names for merge with #22–#32. Captures the J* and timeout passed to
+// NoteRequest / NoteRequestWithRetry and the bool they return. (Sent/retry/
+// free semantics live in note-c; not invented here. See Gaps.)
+
+struct FakeNoteCSendRequest {
+    J * req;
+    uint32_t timeout_seconds;
+    bool return_val;
+    int note_request_calls;
+    int note_request_with_retry_calls;
+};
+FakeNoteCSendRequest fake_note_c_send_request;
+
+bool fakeNoteRequestSendRequest(J * req)
+{
+    fake_note_c_send_request.note_request_calls += 1;
+    fake_note_c_send_request.req = req;
+    return fake_note_c_send_request.return_val;
+}
+
+bool fakeNoteRequestWithRetrySendRequest(J * req, uint32_t timeout_seconds)
+{
+    fake_note_c_send_request.note_request_with_retry_calls += 1;
+    fake_note_c_send_request.req = req;
+    fake_note_c_send_request.timeout_seconds = timeout_seconds;
+    return fake_note_c_send_request.return_val;
+}
+
+// Call after resetFakes(). Captures NoteRequest args and return.
+void useFakeNoteCSendRequest(void)
+{
+    fake_note_c_send_request.req = nullptr;
+    fake_note_c_send_request.timeout_seconds = 0;
+    fake_note_c_send_request.return_val = false;
+    fake_note_c_send_request.note_request_calls = 0;
+    fake_note_c_send_request.note_request_with_retry_calls = 0;
+    NoteRequest_fake.custom_fake = fakeNoteRequestSendRequest;
+}
+
+// Call after resetFakes(). Captures NoteRequestWithRetry args and return.
+void useFakeNoteCSendRequestWithRetry(void)
+{
+    fake_note_c_send_request.req = nullptr;
+    fake_note_c_send_request.timeout_seconds = 0;
+    fake_note_c_send_request.return_val = false;
+    fake_note_c_send_request.note_request_calls = 0;
+    fake_note_c_send_request.note_request_with_retry_calls = 0;
+    NoteRequestWithRetry_fake.custom_fake = fakeNoteRequestWithRetrySendRequest;
+}
+
+}  // namespace
+
 TEST_CASE("test_notecard_begin_i2c_sets_user_agent_to_note_arduino", "[Notecard]")
 {
   resetFakes();
@@ -1435,6 +1491,92 @@ TEST_CASE("test_notecard_newRequest_does_not_modify_note_c_result_value_before_r
 
   free(NoteNewRequest_fake.return_val);
   free(EXPECTED_JSON);
+}
+
+
+// X5 sendRequest outcomes: Notecard::sendRequest / sendRequestWithRetry pass
+// the J* (and timeout) to note-c and return the note-c bool unchanged.
+// Tags: [Notecard][sendRequest].
+TEST_CASE("test_notecard_sendRequest_forwards_the_json_pointer_to_note_c", "[Notecard][sendRequest]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCSendRequest();
+  Notecard notecard;
+  J req;
+  memset(&req, 0x55, sizeof(req));
+
+  // Action
+  notecard.sendRequest(&req);
+
+  // Assert
+  CHECK(1 == fake_note_c_send_request.note_request_calls);
+  CHECK(&req == fake_note_c_send_request.req);
+}
+
+TEST_CASE("test_notecard_sendRequest_returns_the_note_c_bool_result", "[Notecard][sendRequest]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCSendRequest();
+  fake_note_c_send_request.return_val = false;
+  Notecard notecard;
+
+  // Action
+  const bool result = notecard.sendRequest(nullptr);
+
+  // Assert
+  CHECK(false == result);
+  CHECK(1 == fake_note_c_send_request.note_request_calls);
+}
+
+TEST_CASE("test_notecard_sendRequestWithRetry_forwards_the_json_pointer_to_note_c", "[Notecard][sendRequest]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCSendRequestWithRetry();
+  Notecard notecard;
+  J req;
+  memset(&req, 0x55, sizeof(req));
+
+  // Action
+  notecard.sendRequestWithRetry(&req, 0);
+
+  // Assert
+  CHECK(1 == fake_note_c_send_request.note_request_with_retry_calls);
+  CHECK(&req == fake_note_c_send_request.req);
+}
+
+TEST_CASE("test_notecard_sendRequestWithRetry_forwards_the_timeout_to_note_c", "[Notecard][sendRequest]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCSendRequestWithRetry();
+  Notecard notecard;
+  const uint32_t TIMEOUT = 10;
+
+  // Action
+  notecard.sendRequestWithRetry(nullptr, TIMEOUT);
+
+  // Assert
+  CHECK(TIMEOUT == fake_note_c_send_request.timeout_seconds);
+  CHECK(1 == fake_note_c_send_request.note_request_with_retry_calls);
+}
+
+TEST_CASE("test_notecard_sendRequestWithRetry_returns_the_note_c_bool_result", "[Notecard][sendRequest]")
+{
+  resetFakes();
+  // Arrange
+  useFakeNoteCSendRequestWithRetry();
+  fake_note_c_send_request.return_val = false;
+  Notecard notecard;
+
+  // Action
+  const bool result = notecard.sendRequestWithRetry(nullptr, 0);
+
+  // Assert
+  CHECK(false == result);
+  CHECK(1 == fake_note_c_send_request.note_request_with_retry_calls);
 }
 
 TEST_CASE("test_notecard_sendRequest_does_not_modify_j_object_parameter_value_before_passing_to_note_c", "[Notecard]")
