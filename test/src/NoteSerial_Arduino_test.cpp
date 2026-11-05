@@ -20,13 +20,19 @@ static void resetFakes(void)
 
 namespace {
 
-// Stateful fake of the transmit side of a serial port.
-// It is built on the FFF fake HardwareSerial_write (custom_fake). The state is
-// a plain struct, because an FFF custom_fake is a function pointer.
-// Every write call appends the bytes the port accepted to bytes_written.
+// Stateful fake of the transmit side of a serial port (write and flush).
+// It is built on the FFF fakes HardwareSerial_write and HardwareSerial_flush
+// (custom_fake). The state is a plain struct, because an FFF custom_fake is a
+// function pointer.
+// Every write call appends the bytes the port accepted to bytes_written and to
+// pending_output (bytes accepted but not yet drained by flush).
+// Every flush call moves pending_output into drained_output (the observable
+// end state of "pending output has been flushed").
 struct FakeSerialPort {
     std::string bytes_written;       // everything the port accepted, in order
     size_t max_bytes_per_write;      // the port accepts at most this many bytes per write call
+    std::string pending_output;      // accepted bytes not yet drained by flush
+    std::string drained_output;      // bytes moved out by flush, in order
 };
 FakeSerialPort fake_serial_port;
 
@@ -34,15 +40,25 @@ size_t fakeSerialPortWrite(uint8_t * buffer, size_t size)
 {
     const size_t accepted = std::min(size, fake_serial_port.max_bytes_per_write);
     fake_serial_port.bytes_written.append(reinterpret_cast<const char *>(buffer), accepted);
+    fake_serial_port.pending_output.append(reinterpret_cast<const char *>(buffer), accepted);
     return accepted;
 }
 
-// Install the fake port in place of the capture fake. Call after resetFakes().
+void fakeSerialPortFlush(void)
+{
+    fake_serial_port.drained_output.append(fake_serial_port.pending_output);
+    fake_serial_port.pending_output.clear();
+}
+
+// Install the fake port write and flush sides. Call after resetFakes().
 void useFakeSerialPort(size_t max_bytes_per_write = SIZE_MAX)
 {
     fake_serial_port.bytes_written.clear();
+    fake_serial_port.pending_output.clear();
+    fake_serial_port.drained_output.clear();
     fake_serial_port.max_bytes_per_write = max_bytes_per_write;
     HardwareSerial_write_fake.custom_fake = fakeSerialPortWrite;
+    HardwareSerial_flush_fake.custom_fake = fakeSerialPortFlush;
 }
 
 } // namespace
@@ -291,6 +307,47 @@ TEST_CASE("test_noteserial_arduino_transmit_writes_the_given_bytes_to_the_serial
     // Assert
     CHECK("Hello, Test!" == fake_serial_port.bytes_written);
     CHECK(EXPECTED_SIZE == ACTUAL_RESULT);
+}
+
+TEST_CASE("test_noteserial_arduino_transmit_flushes_the_serial_port_after_writing_when_flush_parameter_is_true", "[NoteSerial_Arduino][transmit]")
+{
+  resetFakes();
+    // Arrange
+    // flush=true must drain pending output after the bytes are written. The
+    // drained end state equals the bytes the port accepted; pending is empty.
+    // Ordering is locked: a flush-before-write mutant leaves drained empty
+    // while bytes_written holds the payload.
+    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
+    useFakeSerialPort();
+    char buffer[] = "Hello, Flush!";
+    const size_t SIZE = strlen(buffer);
+
+    // Action
+    noteserial.transmit(reinterpret_cast<uint8_t *>(buffer), SIZE, true);
+
+    // Assert
+    CHECK(fake_serial_port.bytes_written == "Hello, Flush!");
+    CHECK(fake_serial_port.drained_output == "Hello, Flush!");
+    CHECK(fake_serial_port.pending_output.empty());
+}
+
+TEST_CASE("test_noteserial_arduino_transmit_does_not_flush_the_serial_port_when_flush_parameter_is_false", "[NoteSerial_Arduino][transmit]")
+{
+  resetFakes();
+    // Arrange
+    // flush=false must leave the accepted bytes pending and drain nothing.
+    NoteSerial_Arduino<HardwareSerial> noteserial(Serial, 9600);
+    useFakeSerialPort();
+    char buffer[] = "Hold, Please!";
+    const size_t SIZE = strlen(buffer);
+
+    // Action
+    noteserial.transmit(reinterpret_cast<uint8_t *>(buffer), SIZE, false);
+
+    // Assert
+    CHECK(fake_serial_port.bytes_written == "Hold, Please!");
+    CHECK(fake_serial_port.pending_output == "Hold, Please!");
+    CHECK(fake_serial_port.drained_output.empty());
 }
 
 TEST_CASE("test_noteserial_arduino_transmit_invokes_hardware_serial_flush_when_flush_parameter_is_true", "[NoteSerial_Arduino]")
